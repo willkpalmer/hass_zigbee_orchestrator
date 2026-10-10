@@ -1,0 +1,62 @@
+// WP Zigbee Orchestrator panel - shared constants and helpers (see
+// zigbee-orchestrator-panel.js for how the modules fit together).
+
+export const WS = {
+  DEVICES_SUBSCRIBE: "zigbee_orchestrator/devices/subscribe",
+};
+
+// The device groups, in this order (each device's "category", see
+// devices.py): offline devices are kept apart whatever their role.
+export const CATEGORIES = [
+  ["coordinator", "Coordinator"],
+  ["router", "Routers"],
+  ["end_device", "End devices"],
+  ["unknown", "Unknown type"],
+  ["offline", "Offline"],
+];
+
+// At or below this battery level, it's shown as low.
+export const LOW_BATTERY = 20;
+
+// Where the collapsed groups are remembered, per browser.
+export const COLLAPSED_KEY = "zigbee_orchestrator.collapsed_groups";
+// Where each page's search and sort are remembered.
+export const VIEW_STATE_KEY = "zigbee_orchestrator.view_state";
+
+// localStorage, which can be unavailable (private windows, blocked
+// storage): reads fall back, writes are skipped.
+export function loadJSON(key, fallback) {
+  try {
+    const value = JSON.parse(localStorage.getItem(key) || "null");
+    return value ?? fallback;
+  } catch (_err) {
+    return fallback;
+  }
+}
+
+export function saveJSON(key, value) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch (_err) {
+    // Not remembered; it still works for this visit.
+  }
+}
+
+// "1,234" with the browser's grouping.
+export function num(n) {
+  return Number(n || 0).toLocaleString();
+}
+
+// Home Assistant can create a panel's element, and set its hass, narrow and
+// panel, before the element's code has finished loading (the modules load
+// one after another). Those values then sit on the element itself and hide
+// the class's setters, so it would never hear about them: move them over.
+export function upgradeProperties(element, names) {
+  for (const name of names) {
+    if (Object.prototype.hasOwnProperty.call(element, name)) {
+      const value = element[name];
+      delete element[name];
+      element[name] = value;
+    }
+  }
+}

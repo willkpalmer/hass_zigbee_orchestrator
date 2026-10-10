@@ -1,0 +1,13 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Set up WP Zigbee Orchestrator",
+        "description": "WP Zigbee Orchestrator adds a Zigbee Orchestrator page to the sidebar for viewing and managing the Zigbee devices of the ZHA integration."
+      }
+    },
+    "abort": {
+      "already_configured": "WP Zigbee Orchestrator is already configured."
+    }
+  }
+}
