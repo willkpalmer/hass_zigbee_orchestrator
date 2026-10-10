@@ -24,8 +24,22 @@ devices are sorted by name - click a column heading to sort by it instead.
 | Device name | The name you gave the device, or ZHA's. Opens the device's page. |
 | Area | The device's area. |
 | Manufacturer, Model | As ZHA reports them. |
-| Battery | The battery level, from the device's battery sensor (red at 20% or below), or Low/OK for devices that only report a low battery. Opens the battery's history. "—" for mains-powered devices. |
+| Battery | The battery level, from the device's battery sensor, or Low/OK for devices that only report a low battery. Opens the battery's history. "—" for mains-powered devices. |
+| LQI | Link quality of the last message heard from the device (0-255). |
+| RSSI | Signal strength of the last message heard from the device, in dBm. |
 | Status | Online or Offline; hover for when ZHA last heard from it. |
+
+Battery, LQI and RSSI readings are coloured by strength:
+
+| | Red (low) | Amber (medium) | Green (high) |
+|---|---|---|---|
+| Battery | 20% or less, or the device says it's low | 21-50% | over 50% |
+| LQI | below 80 | 80-149 | 150 or more |
+| RSSI | below -80 dBm | -80 to -66 dBm | -65 dBm or more |
+
+An offline device's LQI and RSSI are the last ones heard, shown faded.
+The coordinator has no LQI or RSSI of its own. The Groups page shows the
+battery column (coloured the same way) but not LQI or RSSI.
 
 The list updates live: devices going offline or coming back, new battery
 readings, renames and area changes appear straight away. The filter box

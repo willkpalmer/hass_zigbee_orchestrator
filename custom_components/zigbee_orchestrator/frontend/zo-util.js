@@ -22,8 +22,20 @@ export const CATEGORIES = [
   ["offline", "Offline"],
 ];
 
-// At or below this battery level, it's shown as low.
-export const LOW_BATTERY = 20;
+// Where readings turn from red (low) to amber (medium) to green (high):
+// [the lowest medium reading, the lowest high one].
+export const LEVELS = {
+  battery: [21, 51],   // %: red up to 20%, amber up to 50%
+  lqi: [80, 150],      // link quality, 0-255
+  rssi: [-80, -65],    // dBm: red below -80, green from -65
+};
+
+// "low", "medium" or "high" for a reading, or "" for none.
+export function level(kind, value) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return "";
+  const [medium, high] = LEVELS[kind];
+  return value >= high ? "high" : value >= medium ? "medium" : "low";
+}
 
 // Where the collapsed groups are remembered, per browser.
 export const COLLAPSED_KEY = "zigbee_orchestrator.collapsed_groups";

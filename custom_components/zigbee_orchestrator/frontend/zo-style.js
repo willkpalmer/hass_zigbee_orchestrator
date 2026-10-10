@@ -115,7 +115,12 @@ a:hover { text-decoration: underline; }
 .chip.online { background: rgba(76, 175, 80, 0.15); color: var(--success-color, #43a047); }
 .chip.offline { background: rgba(219, 68, 55, 0.15); color: var(--error-color, #db4437); }
 .chip.disabled { background: rgba(127, 127, 127, 0.15); color: var(--secondary-text-color, #727272); }
-.battery.low { color: var(--error-color, #db4437); font-weight: 600; }
+/* Battery, LQI and RSSI readings: red, amber or green. */
+.level-low { color: var(--error-color, #db4437); font-weight: 600; }
+.level-medium { color: var(--warning-color, #e68a00); font-weight: 600; }
+.level-high { color: var(--success-color, #43a047); font-weight: 500; }
+/* A reading from before the device went offline. */
+.signal.stale { opacity: 0.6; }
 .empty, .status { padding: 32px 16px; text-align: center; color: var(--secondary-text-color, #727272); }
 .footer { padding: 8px 16px 12px; color: var(--secondary-text-color, #727272); font-size: 12px; }
 .label { display: none; }

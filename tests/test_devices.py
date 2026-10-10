@@ -70,7 +70,7 @@ async def test_device_list(hass):
 
     network = {
         coordinator.id: ZhaDevice(role="coordinator", available=True, mains_powered=True),
-        plug.id: ZhaDevice(role="router", available=True, lqi=200, last_seen=0.0, mains_powered=True),
+        plug.id: ZhaDevice(role="router", available=True, lqi=200, rssi=-61, last_seen=0.0, mains_powered=True),
         sensor.id: ZhaDevice(role="end_device", available=True, last_seen=1_700_000_000.0),
         remote.id: ZhaDevice(role="end_device", available=False),
     }
@@ -82,6 +82,8 @@ async def test_device_list(hass):
     assert records["Plug"]["category"] == "router"
     assert records["Plug"]["battery"] is None
     assert records["Plug"]["mains_powered"] is True
+    assert (records["Plug"]["lqi"], records["Plug"]["rssi"]) == (200, -61)
+    assert records["Remote"]["rssi"] is None
     s = records["Kitchen sensor"]
     assert s["category"] == "end_device"
     assert (s["area"], s["manufacturer"], s["model"]) == ("Kitchen", "LUMI", "WSDCGQ11LM")
@@ -127,6 +129,7 @@ async def test_zha_network(hass, monkeypatch):
             self.available = available
             self.is_active_coordinator = active
             self.lqi = 255
+            self.rssi = -70
             self.last_seen = 1.0
             self.is_mains_powered = True
 
@@ -152,8 +155,8 @@ async def test_zha_network(hass, monkeypatch):
 
     network = zha_network(hass)
     assert network == {
-        "coordinator": ZhaDevice(role="coordinator", available=True, lqi=255, last_seen=1.0, mains_powered=True),
-        "router": ZhaDevice(role="router", available=False, lqi=255, last_seen=1.0, mains_powered=True),
+        "coordinator": ZhaDevice(role="coordinator", available=True, lqi=255, rssi=-70, last_seen=1.0, mains_powered=True),
+        "router": ZhaDevice(role="router", available=False, lqi=255, rssi=-70, last_seen=1.0, mains_powered=True),
     }
 
 

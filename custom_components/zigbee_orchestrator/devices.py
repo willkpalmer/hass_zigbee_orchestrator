@@ -46,7 +46,10 @@ class ZhaDevice:
 
     role: str
     available: bool
+    # Link quality (0-255) and signal strength (dBm) of the last message
+    # heard from the device.
     lqi: int | None = None
+    rssi: int | None = None
     # When the device was last heard from, as a Unix time.
     last_seen: float | None = None
     mains_powered: bool | None = None
@@ -90,6 +93,7 @@ def zha_network(hass: HomeAssistant) -> dict[str, ZhaDevice] | None:
                 ),
                 available=bool(getattr(device, "available", False)),
                 lqi=getattr(device, "lqi", None),
+                rssi=getattr(device, "rssi", None),
                 last_seen=getattr(device, "last_seen", None),
                 mains_powered=getattr(device, "is_mains_powered", None),
             )
@@ -176,6 +180,7 @@ def build_device_list(
                 "battery_entity": battery_entity,
                 "mains_powered": info.mains_powered if info else None,
                 "lqi": info.lqi if info else None,
+                "rssi": info.rssi if info else None,
                 "last_seen": last_seen,
                 "disabled": device.disabled_by is not None,
             }

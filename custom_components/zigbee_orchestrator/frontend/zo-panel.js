@@ -7,8 +7,8 @@ const V = new URL(import.meta.url).search;
 // The version loaded, from the ?v= every module is loaded with (panel.py).
 const VERSION = new URLSearchParams(V).get("v") || "";
 const {
-  CATEGORIES, COLLAPSED_KEY, LOW_BATTERY, VIEW_STATE_KEY, WS,
-  loadJSON, num, saveJSON, upgradeProperties,
+  CATEGORIES, COLLAPSED_KEY, VIEW_STATE_KEY, WS,
+  level, loadJSON, num, saveJSON, upgradeProperties,
 } = await import(`./zo-util.js${V}`);
 const { STYLE, TEMPLATE } = await import(`./zo-style.js${V}`);
 
@@ -19,20 +19,31 @@ const CATEGORY_LABELS = Object.fromEntries(CATEGORIES);
 
 const text = (v) => String(v ?? "").toLocaleLowerCase();
 const byText = (key) => (a, b) => text(a[key]).localeCompare(text(b[key]), undefined, { numeric: true });
-// Devices with no battery reading sort after every reading, either way.
-const byBattery = (a, b) => (a.battery ?? -1) - (b.battery ?? -1);
+// Devices with no reading sort before every reading (after, descending).
+const byNumber = (key) => (a, b) => (a[key] ?? -Infinity) - (b[key] ?? -Infinity) || 0;
+const byBattery = byNumber("battery");
 const byStatus = (a, b) => Number(b.available) - Number(a.available);
 const byName = byText("name");
 
-// Both pages' columns: key, heading, how it sorts, cell class.
+// Every column: key, heading, how it sorts, cell class, tooltip, and the
+// pages it's on (both, if none).
 const COLUMNS = [
   { key: "name", label: "Device name", compare: byName, cls: "name" },
   { key: "area", label: "Area", compare: byText("area") },
   { key: "manufacturer", label: "Manufacturer", compare: byText("manufacturer") },
   { key: "model", label: "Model", compare: byText("model") },
   { key: "battery", label: "Battery", compare: byBattery, cls: "num" },
+  {
+    key: "lqi", label: "LQI", compare: byNumber("lqi"), cls: "num", views: ["devices"],
+    title: "Link quality of the last message heard from the device, 0-255: red below 80, amber below 150, green from 150",
+  },
+  {
+    key: "rssi", label: "RSSI", compare: byNumber("rssi"), cls: "num", views: ["devices"],
+    title: "Signal strength of the last message heard from the device, in dBm: red below -80, amber below -65, green from -65",
+  },
   { key: "available", label: "Status", compare: byStatus },
 ];
+const columnsOf = (view) => COLUMNS.filter((c) => !c.views || c.views.includes(view));
 const DEFAULT_SORT = { key: "name", dir: 1 };
 
 // What each page's filter goes by.
@@ -231,7 +242,7 @@ export class ZigbeeOrchestratorPanel extends HTMLElement {
   // The current page's sorted rows of a section.
   _sorted(rows) {
     const { sort } = this._st();
-    const col = COLUMNS.find((c) => c.key === sort.key) || COLUMNS[0];
+    const col = columnsOf(this._view).find((c) => c.key === sort.key) || COLUMNS[0];
     return rows.sort((a, b) =>
       sort.dir * col.compare(a, b) || byName(a, b) || String(a.ieee).localeCompare(String(b.ieee)));
   }
@@ -363,12 +374,12 @@ export class ZigbeeOrchestratorPanel extends HTMLElement {
     const head = this._el("head");
     head.textContent = "";
     const { sort } = this._st();
-    for (const col of COLUMNS) {
+    for (const col of columnsOf(this._view)) {
       const th = document.createElement("th");
       th.className = `sortable ${col.cls === "num" ? "num" : ""}`;
       th.dataset.sort = col.key;
       th.tabIndex = 0;
-      th.title = `Sort by ${col.label.toLowerCase()}`;
+      th.title = col.title ? `${col.title}. Click to sort.` : `Sort by ${col.label.toLowerCase()}`;
       const sorted = sort.key === col.key;
       th.setAttribute("aria-sort", sorted ? (sort.dir > 0 ? "ascending" : "descending") : "none");
       th.append(col.label);
@@ -394,7 +405,7 @@ export class ZigbeeOrchestratorPanel extends HTMLElement {
     tr.setAttribute("aria-expanded", String(!collapsed));
     tr.title = collapsed ? "Show these devices (Enter)" : "Hide these devices (Enter)";
     const td = document.createElement("td");
-    td.colSpan = COLUMNS.length + (this._view === "groups" ? 1 : 0);
+    td.colSpan = columnsOf(this._view).length + (this._view === "groups" ? 1 : 0);
     const caret = document.createElement("span");
     caret.className = "caret";
     caret.textContent = collapsed ? "▸" : "▾";
@@ -443,7 +454,7 @@ export class ZigbeeOrchestratorPanel extends HTMLElement {
     const tr = document.createElement("tr");
     tr.className = "empty-group";
     const td = document.createElement("td");
-    td.colSpan = COLUMNS.length + 1;
+    td.colSpan = columnsOf("groups").length + 1;
     td.className = "sub";
     td.append("No devices in this group yet. ");
     const btn = document.createElement("button");
@@ -508,8 +519,14 @@ export class ZigbeeOrchestratorPanel extends HTMLElement {
       cell("Manufacturer", d.manufacturer),
       cell("Model", d.model),
       this._batteryCell(d),
-      this._statusCell(d),
     );
+    if (!groupsPage) {
+      tr.append(
+        this._signalCell("lqi", "LQI", d.lqi, d),
+        this._signalCell("rssi", "RSSI", d.rssi, d, " dBm"),
+      );
+    }
+    tr.append(this._statusCell(d));
     if (group) {
       const td = document.createElement("td");
       td.className = "remove";
@@ -542,10 +559,11 @@ export class ZigbeeOrchestratorPanel extends HTMLElement {
     span.className = "battery";
     if (d.battery !== null && d.battery !== undefined) {
       span.textContent = `${d.battery}%`;
-      span.classList.toggle("low", d.battery <= LOW_BATTERY || d.battery_low === true);
+      // A device saying its battery is low is red, whatever the level.
+      span.classList.add(`level-${d.battery_low === true ? "low" : level("battery", d.battery)}`);
     } else if (d.battery_low !== null && d.battery_low !== undefined) {
       span.textContent = d.battery_low ? "Low" : "OK";
-      span.classList.toggle("low", d.battery_low);
+      span.classList.add(d.battery_low ? "level-low" : "level-high");
     } else {
       span.textContent = "—";
       span.classList.add("muted");
@@ -562,6 +580,31 @@ export class ZigbeeOrchestratorPanel extends HTMLElement {
     } else {
       td.appendChild(span);
     }
+    return td;
+  }
+
+  // LQI or RSSI, red, amber or green (see LEVELS), "—" when not known.
+  _signalCell(kind, label, value, d, unit = "") {
+    const td = document.createElement("td");
+    td.className = "num";
+    const l = document.createElement("span");
+    l.className = "label sub";
+    l.textContent = `${label}: `;
+    td.appendChild(l);
+    const span = document.createElement("span");
+    span.className = "signal";
+    const lvl = level(kind, value);
+    if (lvl) {
+      span.textContent = `${value}${unit}`;
+      span.classList.add(`level-${lvl}`);
+      span.title = d.available ? `${lvl[0].toUpperCase()}${lvl.slice(1)}` : "Last reading before it went offline";
+      if (!d.available) span.classList.add("stale");
+    } else {
+      span.textContent = "—";
+      span.classList.add("muted");
+      span.title = d.role === "coordinator" ? "The coordinator itself" : "Not reported yet";
+    }
+    td.appendChild(span);
     return td;
   }
 
