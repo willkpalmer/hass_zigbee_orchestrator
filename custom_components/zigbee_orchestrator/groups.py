@@ -2,9 +2,11 @@
 
 A group is just a name and a list of devices (device registry ids), for
 finding and viewing devices easily. They have nothing to do with ZHA's own
-Zigbee groups: nothing is sent to the devices or the Zigbee network, and a
-device can be in any number of groups. They're kept in Home Assistant's
-storage (.storage/zigbee_orchestrator.groups).
+Zigbee groups: nothing is sent to the devices or the Zigbee network. A
+device can be in only one group: adding it to a group it isn't in fails
+while it's in another (the panel only offers the devices in no group).
+They're kept in Home Assistant's storage
+(.storage/zigbee_orchestrator.groups).
 """
 from __future__ import annotations
 
@@ -39,8 +41,15 @@ class GroupStore:
                 self._groups[group["id"]] = {
                     "id": group["id"],
                     "name": str(group["name"]),
-                    "device_ids": [str(d) for d in group.get("device_ids", [])],
+                    "device_ids": list(dict.fromkeys(str(d) for d in group.get("device_ids", []))),
                 }
+        # Groups saved before a device could be in only one (0.2.0): each
+        # device stays in the first of its groups by name.
+        seen: set[str] = set()
+        for group in self.groups:
+            kept = [d for d in group["device_ids"] if d not in seen]
+            seen.update(kept)
+            self._groups[group["id"]]["device_ids"] = kept
 
     @property
     def groups(self) -> list[dict[str, Any]]:
@@ -71,6 +80,16 @@ class GroupStore:
             raise GroupError("No such group")
         return group
 
+    def _check_free(self, device_ids: list[str], group_id: str | None = None) -> None:
+        """Fails if any of the devices is in a group other than group_id."""
+        wanted = set(device_ids)
+        for other in self._groups.values():
+            if other["id"] != group_id and wanted.intersection(other["device_ids"]):
+                raise GroupError(
+                    f"A device can be in only one group, and some of these are "
+                    f"already in {other['name']}"
+                )
+
     @callback
     def _changed(self) -> None:
         self._store.async_delay_save(
@@ -81,6 +100,7 @@ class GroupStore:
 
     @callback
     def async_create(self, name: str, device_ids: list[str] | None = None) -> dict[str, Any]:
+        self._check_free(device_ids or [])
         group = {
             "id": uuid.uuid4().hex,
             "name": self._name(name),
@@ -104,12 +124,15 @@ class GroupStore:
 
     @callback
     def async_set_devices(self, group_id: str, device_ids: list[str]) -> None:
-        self._get(group_id)["device_ids"] = list(dict.fromkeys(device_ids))
+        group = self._get(group_id)
+        self._check_free(device_ids, group_id)
+        group["device_ids"] = list(dict.fromkeys(device_ids))
         self._changed()
 
     @callback
     def async_add_devices(self, group_id: str, device_ids: list[str]) -> None:
         group = self._get(group_id)
+        self._check_free(device_ids, group_id)
         group["device_ids"] = list(dict.fromkeys([*group["device_ids"], *device_ids]))
         self._changed()
 
@@ -121,7 +144,7 @@ class GroupStore:
 
     @callback
     def async_forget_device(self, device_id: str) -> None:
-        """Takes a device removed from Home Assistant out of every group."""
+        """Takes a device removed from Home Assistant out of its group."""
         changed = False
         for group in self._groups.values():
             if device_id in group["device_ids"]:

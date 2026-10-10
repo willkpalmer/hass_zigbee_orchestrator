@@ -165,6 +165,8 @@ tr.empty-group td { padding: 10px 12px 10px 36px; }
 .picker::backdrop { background: rgba(0, 0, 0, 0.4); }
 .picker h2 { font-size: 18px; font-weight: 500; margin: 0; padding: 16px 16px 4px; }
 .picker .toolbar { padding: 8px 16px; }
+.pick-taken { padding: 2px 16px 0; }
+.pick-taken:empty { display: none; }
 .pick-list { flex: 1 1 auto; min-height: 0; overflow: auto; border-top: 1px solid var(--divider-color, #e0e0e0); border-bottom: 1px solid var(--divider-color, #e0e0e0); }
 .pick-row { display: flex; align-items: center; gap: 12px; padding: 8px 16px; cursor: pointer; }
 .pick-row:hover { background: var(--secondary-background-color, #f5f5f5); }
@@ -239,7 +241,7 @@ export const TEMPLATE = `
     </div>
     <div class="hint" data-el="hint" hidden>
       Groups here are only for finding and viewing devices. They aren't Zigbee groups: making or changing them
-      doesn't change anything in ZHA or on the devices, and a device can be in any number of them.
+      doesn't change anything in ZHA or on the devices. A device can be in only one group.
     </div>
     <div class="edit-bar" data-el="edit-bar">
       <span data-el="edit-label"></span>
@@ -260,6 +262,7 @@ export const TEMPLATE = `
 </div>
 <dialog class="picker" data-el="picker" aria-labelledby="pick-title">
   <h2 id="pick-title" data-el="pick-title"></h2>
+  <div class="sub pick-taken" data-el="pick-taken"></div>
   <div class="toolbar">
     <input type="search" data-el="pick-filter" aria-label="Filter devices" placeholder="Filter by name, area, manufacturer or model">
     <button class="action secondary" data-action="pick-all" title="Tick every device shown">Select shown</button>

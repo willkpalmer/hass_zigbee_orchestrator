@@ -204,6 +204,8 @@ export class ZigbeeOrchestratorPanel extends HTMLElement {
     if (this._edit?.group && !ids.has(this._edit.group.id)) this._edit = null;
     if (this._picking && !ids.has(this._picking.group.id)) this._el("picker").close();
     this._render();
+    // Devices put in another group meanwhile (another browser tab) go.
+    if (this._picking) this._renderPicker();
   }
 
   _saveViewState() {
@@ -614,18 +616,22 @@ export class ZigbeeOrchestratorPanel extends HTMLElement {
     this._el("pick-filter").focus();
   }
 
-  // Every device, by name, ticked when it's in the group; the filter only
-  // hides devices, it doesn't untick them.
+  // Every device that isn't in another group (a device can be in only
+  // one), by name, ticked when it's in this group; the filter only hides
+  // devices, it doesn't untick them.
   _renderPicker() {
     if (!this._picking) return;
-    const { selected } = this._picking;
+    const { group, selected } = this._picking;
+    const taken = new Set(this._groups.filter((g) => g.id !== group.id).flatMap((g) => g.device_ids));
+    for (const id of taken) selected.delete(id);
     const words = wordsOf(this._el("pick-filter").value);
     const list = this._el("pick-list");
     list.textContent = "";
     const frag = document.createDocumentFragment();
     const devices = [...this._devices].sort((a, b) => byName(a, b) || String(a.ieee).localeCompare(String(b.ieee)));
     let shown = 0;
-    for (const d of devices) {
+    const free = devices.filter((d) => !taken.has(d.id));
+    for (const d of free) {
       if (!matches(d, words)) continue;
       shown += 1;
       const label = document.createElement("label");
@@ -656,10 +662,15 @@ export class ZigbeeOrchestratorPanel extends HTMLElement {
     if (!shown) {
       const empty = document.createElement("div");
       empty.className = "empty";
-      empty.textContent = this._devices.length ? "No devices match the filter." : "No Zigbee devices found.";
+      empty.textContent = !this._devices.length ? "No Zigbee devices found."
+        : !free.length ? "Every device is already in another group. Take devices out of their group to add them here."
+          : "No devices match the filter.";
       list.appendChild(empty);
     }
     this._el("pick-count").textContent = `${num(selected.size)} selected`;
+    this._el("pick-taken").textContent = taken.size
+      ? `${num(taken.size)} ${taken.size === 1 ? "device is" : "devices are"} already in another group and not listed: a device can be in only one group.`
+      : "";
   }
 
   async _savePicker() {

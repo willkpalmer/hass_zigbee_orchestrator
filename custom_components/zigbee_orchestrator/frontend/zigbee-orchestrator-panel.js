@@ -20,8 +20,8 @@
 //             viewing devices easily: not ZHA's Zigbee groups, and nothing
 //             is changed in ZHA or on the devices. Each group can be
 //             renamed, deleted and collapsed, and its devices chosen from
-//             a list of every device (Choose devices) or taken out one by
-//             one. The devices in no group are listed last, under
+//             a list of every device in no other group (Choose devices: a
+//             device can be in only one group) or taken out one by one. The devices in no group are listed last, under
 //             Ungrouped.
 //
 // The device list and the groups are each subscribed to once over the

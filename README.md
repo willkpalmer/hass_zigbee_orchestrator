@@ -42,12 +42,14 @@ for example "Upstairs sensors" or "Garden lights".
 
 **These are not Zigbee groups.** They're separate from the groups on
 ZHA's own configuration page: making or changing them sends nothing to the
-devices and changes nothing in ZHA. A device can be in any number of
-groups, and deleting a group never touches its devices.
+devices and changes nothing in ZHA, and deleting a group never touches
+its devices. A device can be in only one group.
 
 - **New group** - name it, then tick its devices in the list of every
-  Zigbee device (filterable).
+  Zigbee device that isn't already in a group (filterable).
 - **Choose devices** on a group's heading - tick or untick devices.
+  Devices already in another group aren't listed: take a device out of
+  its group first to move it.
 - **✕** on a device's row - take it out of that group.
 - **Rename** and **Delete** on a group's heading.
 
