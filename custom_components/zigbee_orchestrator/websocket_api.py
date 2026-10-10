@@ -8,6 +8,11 @@ reading), when the device, entity or area registry changes, and once a
 minute in case ZHA changed something with no state change. Changes close
 together are sent once, and an unchanged list isn't sent again.
 
+zigbee_orchestrator/groups/subscribe sends the device groups made on the
+Groups page (see groups.py), {"groups": [...]}, straight away and after
+every change. zigbee_orchestrator/groups/create, rename, delete,
+set_devices, add_devices and remove_devices change them.
+
 Admin-only, like the panel itself.
 """
 from __future__ import annotations
@@ -25,9 +30,20 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.event import async_call_later, async_track_time_interval
 
+from .const import DATA_GROUPS
 from .devices import build_device_list, zha_network
+from .groups import GroupError, GroupStore
 
 WS_DEVICES_SUBSCRIBE = "zigbee_orchestrator/devices/subscribe"
+WS_GROUPS_SUBSCRIBE = "zigbee_orchestrator/groups/subscribe"
+WS_GROUPS_CREATE = "zigbee_orchestrator/groups/create"
+WS_GROUPS_RENAME = "zigbee_orchestrator/groups/rename"
+WS_GROUPS_DELETE = "zigbee_orchestrator/groups/delete"
+WS_GROUPS_SET_DEVICES = "zigbee_orchestrator/groups/set_devices"
+WS_GROUPS_ADD_DEVICES = "zigbee_orchestrator/groups/add_devices"
+WS_GROUPS_REMOVE_DEVICES = "zigbee_orchestrator/groups/remove_devices"
+
+_DEVICE_IDS = vol.All([str], vol.Length(max=10_000))
 
 # How long changes are gathered before the list is sent.
 _DEBOUNCE_SECONDS = 1.0
@@ -37,6 +53,13 @@ _REFRESH_INTERVAL = timedelta(minutes=1)
 @callback
 def async_setup(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, websocket_devices_subscribe)
+    websocket_api.async_register_command(hass, websocket_groups_subscribe)
+    websocket_api.async_register_command(hass, websocket_groups_create)
+    websocket_api.async_register_command(hass, websocket_groups_rename)
+    websocket_api.async_register_command(hass, websocket_groups_delete)
+    websocket_api.async_register_command(hass, websocket_groups_set_devices)
+    websocket_api.async_register_command(hass, websocket_groups_add_devices)
+    websocket_api.async_register_command(hass, websocket_groups_remove_devices)
 
 
 @callback
@@ -97,3 +120,94 @@ def websocket_devices_subscribe(
     connection.subscriptions[msg["id"]] = _unsubscribe
     connection.send_result(msg["id"])
     connection.send_message(websocket_api.event_message(msg["id"], payload))
+
+
+def _groups(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> GroupStore | None:
+    store: GroupStore | None = hass.data.get(DATA_GROUPS)
+    if store is None:
+        connection.send_error(msg["id"], "not_loaded", "WP Zigbee Orchestrator isn't loaded")
+    return store
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command({vol.Required("type"): WS_GROUPS_SUBSCRIBE})
+@callback
+def websocket_groups_subscribe(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    if (store := _groups(hass, connection, msg)) is None:
+        return
+
+    @callback
+    def _forward() -> None:
+        connection.send_message(websocket_api.event_message(msg["id"], {"groups": store.groups}))
+
+    connection.subscriptions[msg["id"]] = store.async_subscribe(_forward)
+    connection.send_result(msg["id"])
+    _forward()
+
+
+def _group_command(schema: dict, change):
+    """A command changing the groups: change(store, msg), answered with its
+    result, or an error the panel shows (a name that's taken, ...)."""
+
+    @websocket_api.require_admin
+    @websocket_api.websocket_command(schema)
+    @callback
+    def _command(
+        hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+    ) -> None:
+        if (store := _groups(hass, connection, msg)) is None:
+            return
+        try:
+            result = change(store, msg)
+        except GroupError as err:
+            connection.send_error(msg["id"], "invalid", str(err))
+            return
+        connection.send_result(msg["id"], result)
+
+    return _command
+
+
+websocket_groups_create = _group_command(
+    {
+        vol.Required("type"): WS_GROUPS_CREATE,
+        vol.Required("name"): str,
+        vol.Optional("device_ids", default=[]): _DEVICE_IDS,
+    },
+    lambda store, msg: store.async_create(msg["name"], msg["device_ids"]),
+)
+websocket_groups_rename = _group_command(
+    {vol.Required("type"): WS_GROUPS_RENAME, vol.Required("group_id"): str, vol.Required("name"): str},
+    lambda store, msg: store.async_rename(msg["group_id"], msg["name"]),
+)
+websocket_groups_delete = _group_command(
+    {vol.Required("type"): WS_GROUPS_DELETE, vol.Required("group_id"): str},
+    lambda store, msg: store.async_delete(msg["group_id"]),
+)
+websocket_groups_set_devices = _group_command(
+    {
+        vol.Required("type"): WS_GROUPS_SET_DEVICES,
+        vol.Required("group_id"): str,
+        vol.Required("device_ids"): _DEVICE_IDS,
+    },
+    lambda store, msg: store.async_set_devices(msg["group_id"], msg["device_ids"]),
+)
+websocket_groups_add_devices = _group_command(
+    {
+        vol.Required("type"): WS_GROUPS_ADD_DEVICES,
+        vol.Required("group_id"): str,
+        vol.Required("device_ids"): _DEVICE_IDS,
+    },
+    lambda store, msg: store.async_add_devices(msg["group_id"], msg["device_ids"]),
+)
+websocket_groups_remove_devices = _group_command(
+    {
+        vol.Required("type"): WS_GROUPS_REMOVE_DEVICES,
+        vol.Required("group_id"): str,
+        vol.Required("device_ids"): _DEVICE_IDS,
+    },
+    lambda store, msg: store.async_remove_devices(msg["group_id"], msg["device_ids"]),
+)

@@ -35,6 +35,28 @@ model or IEEE address.
 If ZHA isn't running, the devices it registered are still listed, all
 offline, with a note at the top.
 
+## Groups
+
+Your own groups of devices, purely for finding and viewing them easily -
+for example "Upstairs sensors" or "Garden lights".
+
+**These are not Zigbee groups.** They're separate from the groups on
+ZHA's own configuration page: making or changing them sends nothing to the
+devices and changes nothing in ZHA. A device can be in any number of
+groups, and deleting a group never touches its devices.
+
+- **New group** - name it, then tick its devices in the list of every
+  Zigbee device (filterable).
+- **Choose devices** on a group's heading - tick or untick devices.
+- **✕** on a device's row - take it out of that group.
+- **Rename** and **Delete** on a group's heading.
+
+Each group is listed with the same columns as the Devices page, sorted by
+name, and can be collapsed like the Devices page's groups. The filter box
+narrows every group to the devices that match. Groups are kept in Home
+Assistant's storage (`.storage/zigbee_orchestrator.groups`), and a device
+removed from Home Assistant leaves its groups by itself.
+
 ## Installation
 
 ### HACS

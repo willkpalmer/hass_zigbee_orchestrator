@@ -1,5 +1,6 @@
 // WP Zigbee Orchestrator panel - the main element,
-// <zigbee-orchestrator-panel>: the page buttons and the Devices page (see
+// <zigbee-orchestrator-panel>: the page buttons, the Devices and Groups
+// pages, and the device picker for groups (see
 // zigbee-orchestrator-panel.js for how the modules fit together).
 
 const V = new URL(import.meta.url).search;
@@ -11,19 +12,19 @@ const {
 } = await import(`./zo-util.js${V}`);
 const { STYLE, TEMPLATE } = await import(`./zo-style.js${V}`);
 
-const VIEWS = ["devices"];
+const VIEWS = ["devices", "groups"];
 const CATEGORY_LABELS = Object.fromEntries(CATEGORIES);
-const CATEGORY_ORDER = Object.fromEntries(CATEGORIES.map(([key], i) => [key, i]));
 
 const text = (v) => String(v ?? "").toLocaleLowerCase();
 const byText = (key) => (a, b) => text(a[key]).localeCompare(text(b[key]), undefined, { numeric: true });
 // Devices with no battery reading sort after every reading, either way.
 const byBattery = (a, b) => (a.battery ?? -1) - (b.battery ?? -1);
 const byStatus = (a, b) => Number(b.available) - Number(a.available);
+const byName = byText("name");
 
-// The Devices page's columns: key, heading, how it sorts, cell class.
+// Both pages' columns: key, heading, how it sorts, cell class.
 const COLUMNS = [
-  { key: "name", label: "Device name", compare: byText("name"), cls: "name" },
+  { key: "name", label: "Device name", compare: byName, cls: "name" },
   { key: "area", label: "Area", compare: byText("area") },
   { key: "manufacturer", label: "Manufacturer", compare: byText("manufacturer") },
   { key: "model", label: "Model", compare: byText("model") },
@@ -31,6 +32,14 @@ const COLUMNS = [
   { key: "available", label: "Status", compare: byStatus },
 ];
 const DEFAULT_SORT = { key: "name", dir: 1 };
+
+// What each page's filter goes by.
+function matches(d, words) {
+  if (!words.length) return true;
+  const hay = text([d.name, d.area, d.manufacturer, d.model, d.ieee].join(" "));
+  return words.every((w) => hay.includes(w));
+}
+const wordsOf = (filter) => text(filter).split(/\s+/).filter(Boolean);
 
 export class ZigbeeOrchestratorPanel extends HTMLElement {
   constructor() {
@@ -43,35 +52,51 @@ export class ZigbeeOrchestratorPanel extends HTMLElement {
     this._loaded = false;
     this._zhaRunning = true;
     this._updated = null;
-    this._unsub = null;
-    this._subscribing = false;
-    const saved = loadJSON(VIEW_STATE_KEY, {}).devices || {};
-    this._filter = typeof saved.filter === "string" ? saved.filter : "";
-    this._sort = COLUMNS.some((c) => c.key === saved.sort?.key)
-      ? { key: saved.sort.key, dir: saved.sort.dir === -1 ? -1 : 1 }
-      : { ...DEFAULT_SORT };
-    const collapsed = loadJSON(COLLAPSED_KEY, {}).devices;
-    this._collapsed = new Set(Array.isArray(collapsed) ? collapsed : []);
+    this._groups = [];
+    this._groupsLoaded = false;
+    this._subs = {};
+    // The open name/delete bar on the Groups page:
+    // { mode: "create" | "rename" | "delete", group }.
+    this._edit = null;
+    // The group whose devices are being chosen, and the ticked devices.
+    this._picking = null;
+    // Each page's search, sort and collapsed groups, as left last time.
+    const saved = loadJSON(VIEW_STATE_KEY, {});
+    const collapsed = loadJSON(COLLAPSED_KEY, {});
+    this._state = {};
+    for (const view of VIEWS) {
+      const was = saved[view] || {};
+      this._state[view] = {
+        filter: typeof was.filter === "string" ? was.filter : "",
+        sort: COLUMNS.some((c) => c.key === was.sort?.key)
+          ? { key: was.sort.key, dir: was.sort.dir === -1 ? -1 : 1 }
+          : { ...DEFAULT_SORT },
+        collapsed: new Set(Array.isArray(collapsed[view]) ? collapsed[view] : []),
+      };
+    }
 
     this.attachShadow({ mode: "open" });
     this.shadowRoot.innerHTML = `<style>${STYLE}</style>${TEMPLATE}`;
     this._el = (name) => this.shadowRoot.querySelector(`[data-el="${name}"]`);
     this._el("version").textContent = VERSION ? `v${VERSION}` : "";
-    this._el("filter").value = this._filter;
     this.shadowRoot.addEventListener("click", (ev) => this._onClick(ev));
     this.shadowRoot.addEventListener("keydown", (ev) => this._onKeyDown(ev));
+    this.shadowRoot.addEventListener("change", (ev) => this._onChange(ev));
     this._el("filter").addEventListener("input", (ev) => {
-      this._filter = ev.target.value;
+      this._st().filter = ev.target.value;
       this._saveViewState();
       this._render();
     });
+    this._el("pick-filter").addEventListener("input", () => this._renderPicker());
+    this._el("edit-name").addEventListener("input", () => { this._el("edit-error").textContent = ""; });
+    this._el("picker").addEventListener("close", () => { this._picking = null; });
     this._onHash = () => this._applyHash();
     // "/" jumps to the filter from anywhere on the page (not while typing).
     this._onWindowKey = (ev) => {
       if (!this.isConnected || this.hidden || ev.defaultPrevented) return;
       const typing = ev.composedPath().some((el) => el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable);
       if (typing || ev.ctrlKey || ev.metaKey || ev.altKey) return;
-      if (ev.key === "/") {
+      if (ev.key === "/" && !this._picking) {
         ev.preventDefault();
         this._el("filter").focus();
       }
@@ -80,7 +105,7 @@ export class ZigbeeOrchestratorPanel extends HTMLElement {
 
   set hass(hass) {
     this._hass = hass;
-    if (this.isConnected) this._subscribe();
+    if (this.isConnected) this._subscribeAll();
   }
 
   get hass() { return this._hass; }
@@ -104,47 +129,58 @@ export class ZigbeeOrchestratorPanel extends HTMLElement {
     window.addEventListener("hashchange", this._onHash);
     window.addEventListener("keydown", this._onWindowKey);
     this._applyHash();
-    if (this._hass) this._subscribe();
+    if (this._hass) this._subscribeAll();
   }
 
   disconnectedCallback() {
     window.removeEventListener("hashchange", this._onHash);
     window.removeEventListener("keydown", this._onWindowKey);
-    this._unsubscribe();
+    for (const [key, sub] of Object.entries(this._subs)) {
+      if (sub.unsub) sub.unsub();
+      delete this._subs[key];
+    }
   }
+
+  _st(view = this._view) { return this._state[view]; }
 
   _applyHash() {
     const hash = window.location.hash.replace("#", "");
     const view = VIEWS.includes(hash) ? hash : this._view;
-    if (view !== this._view || !this._rendered) {
-      this._view = view;
-      this._render();
+    if (view !== this._view || !this._rendered) this._setView(view, false);
+  }
+
+  _setView(view, updateHash = true) {
+    if (!VIEWS.includes(view)) return;
+    this._view = view;
+    this._edit = null;
+    if (updateHash) {
+      history.replaceState(history.state, "", `${window.location.pathname}${window.location.search}#${view}`);
     }
+    this._el("filter").value = this._st().filter;
+    this._el("scroll").scrollTop = 0;
+    this._render();
   }
 
   // -- data -----------------------------------------------------------
 
-  async _subscribe() {
-    if (this._unsub || this._subscribing || !this._hass?.connection) return;
-    this._subscribing = true;
+  _subscribeAll() {
+    this._subscribe("devices", WS.DEVICES_SUBSCRIBE, (msg) => this._onDevices(msg));
+    this._subscribe("groups", WS.GROUPS_SUBSCRIBE, (msg) => this._onGroups(msg));
+  }
+
+  async _subscribe(key, type, handler) {
+    const sub = this._subs[key] || (this._subs[key] = {});
+    if (sub.unsub || sub.subscribing || !this._hass?.connection) return;
+    sub.subscribing = true;
     try {
-      const unsub = await this._hass.connection.subscribeMessage(
-        (msg) => this._onDevices(msg), { type: WS.DEVICES_SUBSCRIBE },
-      );
-      if (this.isConnected) this._unsub = unsub;
+      const unsub = await this._hass.connection.subscribeMessage(handler, { type });
+      if (this.isConnected && this._subs[key] === sub) sub.unsub = unsub;
       else unsub();
     } catch (err) {
       this._error = err?.message || String(err);
       this._render();
     } finally {
-      this._subscribing = false;
-    }
-  }
-
-  _unsubscribe() {
-    if (this._unsub) {
-      this._unsub();
-      this._unsub = null;
+      sub.subscribing = false;
     }
   }
 
@@ -155,39 +191,71 @@ export class ZigbeeOrchestratorPanel extends HTMLElement {
     this._error = null;
     this._updated = new Date();
     this._render();
+    if (this._picking) this._renderPicker();
+  }
+
+  _onGroups(msg) {
+    this._groups = Array.isArray(msg.groups) ? msg.groups : [];
+    this._groupsLoaded = true;
+    // A group deleted elsewhere (another browser tab) closes what's open for it.
+    const ids = new Set(this._groups.map((g) => g.id));
+    if (this._edit?.group && !ids.has(this._edit.group.id)) this._edit = null;
+    if (this._picking && !ids.has(this._picking.group.id)) this._el("picker").close();
+    this._render();
   }
 
   _saveViewState() {
-    saveJSON(VIEW_STATE_KEY, { devices: { filter: this._filter, sort: this._sort } });
+    const saved = {};
+    for (const view of VIEWS) saved[view] = { filter: this._st(view).filter, sort: this._st(view).sort };
+    saveJSON(VIEW_STATE_KEY, saved);
   }
 
   _saveCollapsed() {
-    saveJSON(COLLAPSED_KEY, { devices: [...this._collapsed] });
+    const saved = {};
+    for (const view of VIEWS) saved[view] = [...this._st(view).collapsed];
+    saveJSON(COLLAPSED_KEY, saved);
+  }
+
+  async _call(message) {
+    return this._hass.connection.sendMessagePromise(message);
   }
 
   // -- rendering ------------------------------------------------------
 
-  // The devices matching the filter, by group and then the chosen sort
-  // (by name, then by IEEE address, among equals).
-  _rows() {
-    const words = text(this._filter).split(/\s+/).filter(Boolean);
-    const rows = this._devices.filter((d) => {
-      if (!words.length) return true;
-      const hay = text([d.name, d.area, d.manufacturer, d.model, d.ieee].join(" "));
-      return words.every((w) => hay.includes(w));
-    });
-    const col = COLUMNS.find((c) => c.key === this._sort.key) || COLUMNS[0];
-    const byName = byText("name");
-    rows.sort((a, b) =>
-      (CATEGORY_ORDER[a.category] ?? 99) - (CATEGORY_ORDER[b.category] ?? 99)
-      || this._sort.dir * col.compare(a, b)
-      || byName(a, b)
-      || String(a.ieee).localeCompare(String(b.ieee)));
-    return rows;
+  // The current page's sorted rows of a section.
+  _sorted(rows) {
+    const { sort } = this._st();
+    const col = COLUMNS.find((c) => c.key === sort.key) || COLUMNS[0];
+    return rows.sort((a, b) =>
+      sort.dir * col.compare(a, b) || byName(a, b) || String(a.ieee).localeCompare(String(b.ieee)));
+  }
+
+  // The current page's groups of rows: { key, label, cls, rows, group? }.
+  // Devices: by category (offline apart), only those with devices. Groups:
+  // every group by name (while filtering, only those with a match).
+  _sections() {
+    const words = wordsOf(this._st().filter);
+    if (this._view === "devices") {
+      const shown = this._devices.filter((d) => matches(d, words));
+      return CATEGORIES
+        .map(([key, label]) => ({ key, label, cls: key, rows: this._sorted(shown.filter((d) => d.category === key)) }))
+        .filter((s) => s.rows.length);
+    }
+    const byId = new Map(this._devices.map((d) => [d.id, d]));
+    return this._groups
+      .map((group) => {
+        const members = group.device_ids.map((id) => byId.get(id)).filter(Boolean);
+        return {
+          key: group.id, label: group.name, cls: "user-group", group, total: members.length,
+          rows: this._sorted(members.filter((d) => matches(d, words))),
+        };
+      })
+      .filter((s) => !words.length || s.rows.length);
   }
 
   _render() {
     this._rendered = true;
+    const isGroups = this._view === "groups";
     for (const btn of this.shadowRoot.querySelectorAll(".view")) {
       btn.classList.toggle("active", btn.dataset.view === this._view);
     }
@@ -196,48 +264,62 @@ export class ZigbeeOrchestratorPanel extends HTMLElement {
     count.textContent = this._loaded && offline ? num(offline) : "";
     count.classList.toggle("alert", offline > 0);
     count.title = `${offline} offline`;
+    const groupCount = this.shadowRoot.querySelector('[data-count="groups"]');
+    groupCount.textContent = this._groups.length ? num(this._groups.length) : "";
+    groupCount.title = `${this._groups.length} groups`;
     this._renderSummary(offline);
     this._el("notice").hidden = !this._loaded || this._zhaRunning;
+    this._el("hint").hidden = !isGroups;
+    for (const el of this.shadowRoot.querySelectorAll("[data-only-view]")) {
+      el.hidden = !el.dataset.onlyView.split(" ").includes(this._view);
+    }
+    this._el("filter").placeholder = isGroups
+      ? "Filter the groups' devices by name, area, manufacturer or model"
+      : "Filter by name, area, manufacturer or model";
+    this._renderEditBar();
 
+    const sections = this._sections();
     this._renderHead();
-    const rows = this._rows();
     const body = this._el("body");
     body.textContent = "";
     const frag = document.createDocumentFragment();
-    const sizes = new Map();
-    for (const r of rows) sizes.set(r.category, (sizes.get(r.category) || 0) + 1);
-    let lastGroup = null;
-    for (const r of rows) {
-      const collapsed = this._collapsed.has(r.category);
-      if (r.category !== lastGroup) {
-        lastGroup = r.category;
-        frag.appendChild(this._groupRow(r.category, sizes.get(r.category), collapsed));
-      }
-      if (!collapsed) frag.appendChild(this._deviceRow(r));
+    const { collapsed } = this._st();
+    for (const section of sections) {
+      const isCollapsed = collapsed.has(section.key);
+      frag.appendChild(this._groupRow(section, isCollapsed));
+      if (isCollapsed) continue;
+      for (const d of section.rows) frag.appendChild(this._deviceRow(d, section.group));
+      if (section.group && !section.rows.length) frag.appendChild(this._emptyGroupRow(section.group));
     }
     body.appendChild(frag);
 
     const status = this._el("status");
     status.hidden = false;
+    const filtering = wordsOf(this._st().filter).length > 0;
     if (this._error) status.textContent = `Couldn't load the devices: ${this._error}`;
-    else if (!this._loaded) status.textContent = "Loading…";
-    else if (!this._devices.length) status.textContent = "No Zigbee devices found. Is the ZHA integration set up?";
-    else if (!rows.length) status.textContent = "No devices match the filter.";
+    else if (!this._loaded || (isGroups && !this._groupsLoaded)) status.textContent = "Loading…";
+    else if (isGroups && !this._groups.length) status.textContent = "No groups yet. Make one with New group, then choose its devices.";
+    else if (!isGroups && !this._devices.length) status.textContent = "No Zigbee devices found. Is the ZHA integration set up?";
+    else if (!sections.length && filtering) status.textContent = isGroups ? "No device in any group matches the filter." : "No devices match the filter.";
     else status.hidden = true;
 
-    const groups = [...sizes.keys()];
+    const keys = sections.map((s) => s.key);
     const toggle = this.shadowRoot.querySelector('[data-action="toggle-groups"]');
-    const allCollapsed = groups.length > 0 && groups.every((g) => this._collapsed.has(g));
+    const allCollapsed = keys.length > 0 && keys.every((k) => collapsed.has(k));
     toggle.textContent = allCollapsed ? "Expand all" : "Collapse all";
-    toggle.disabled = !groups.length;
+    toggle.disabled = !keys.length;
 
     const footer = this._el("footer");
     if (!this._loaded) footer.textContent = "";
-    else {
-      const shown = rows.length === this._devices.length
-        ? `${num(rows.length)} devices`
-        : `${num(rows.length)} of ${num(this._devices.length)} devices`;
-      footer.textContent = `${shown} · updated ${this._updated.toLocaleTimeString()}`;
+    else if (isGroups) {
+      const inGroups = new Set(this._groups.flatMap((g) => g.device_ids)).size;
+      footer.textContent = `${num(this._groups.length)} groups · ${num(inGroups)} of ${num(this._devices.length)} devices in at least one group`;
+    } else {
+      const shown = sections.reduce((n, s) => n + s.rows.length, 0);
+      const devices = shown === this._devices.length
+        ? `${num(shown)} devices`
+        : `${num(shown)} of ${num(this._devices.length)} devices`;
+      footer.textContent = `${devices} · updated ${this._updated.toLocaleTimeString()}`;
     }
   }
 
@@ -257,44 +339,86 @@ export class ZigbeeOrchestratorPanel extends HTMLElement {
   _renderHead() {
     const head = this._el("head");
     head.textContent = "";
+    const { sort } = this._st();
     for (const col of COLUMNS) {
       const th = document.createElement("th");
       th.className = `sortable ${col.cls === "num" ? "num" : ""}`;
       th.dataset.sort = col.key;
       th.tabIndex = 0;
       th.title = `Sort by ${col.label.toLowerCase()}`;
-      const sorted = this._sort.key === col.key;
-      th.setAttribute("aria-sort", sorted ? (this._sort.dir > 0 ? "ascending" : "descending") : "none");
+      const sorted = sort.key === col.key;
+      th.setAttribute("aria-sort", sorted ? (sort.dir > 0 ? "ascending" : "descending") : "none");
       th.append(col.label);
       const arrow = document.createElement("span");
       arrow.className = "arrow";
-      arrow.textContent = sorted ? (this._sort.dir > 0 ? "▲" : "▼") : "";
+      arrow.textContent = sorted ? (sort.dir > 0 ? "▲" : "▼") : "";
       th.appendChild(arrow);
+      head.appendChild(th);
+    }
+    if (this._view === "groups") {
+      const th = document.createElement("th");
+      th.className = "remove";
+      th.setAttribute("aria-label", "Remove from group");
       head.appendChild(th);
     }
   }
 
-  _groupRow(category, size, collapsed) {
+  _groupRow(section, collapsed) {
     const tr = document.createElement("tr");
-    tr.className = `group ${category}`;
-    tr.dataset.groupToggle = category;
+    tr.className = `group ${section.cls}`;
+    tr.dataset.groupToggle = section.key;
     tr.tabIndex = 0;
     tr.setAttribute("aria-expanded", String(!collapsed));
     tr.title = collapsed ? "Show these devices (Enter)" : "Hide these devices (Enter)";
     const td = document.createElement("td");
-    td.colSpan = COLUMNS.length;
+    td.colSpan = COLUMNS.length + (section.group ? 1 : 0);
     const caret = document.createElement("span");
     caret.className = "caret";
     caret.textContent = collapsed ? "▸" : "▾";
     const count = document.createElement("span");
     count.className = "group-count";
-    count.textContent = ` (${num(size)})`;
-    td.append(caret, CATEGORY_LABELS[category] || category, count);
+    const filtered = section.group && section.rows.length !== section.total;
+    count.textContent = filtered
+      ? ` (${num(section.rows.length)} of ${num(section.total)})`
+      : ` (${num(section.rows.length)})`;
+    td.append(caret, section.group ? section.label : CATEGORY_LABELS[section.key] || section.label, count);
+    if (section.group) {
+      for (const [action, label, title] of [
+        ["choose-devices", "Choose devices", "Add devices to this group, or take them out"],
+        ["rename-group", "Rename", "Rename this group"],
+        ["ask-delete-group", "Delete", "Delete this group (its devices aren't affected)"],
+      ]) {
+        const btn = document.createElement("button");
+        btn.className = `group-link${action === "ask-delete-group" ? " danger" : ""}`;
+        btn.dataset.action = action;
+        btn.dataset.group = section.key;
+        btn.textContent = label;
+        btn.title = title;
+        td.appendChild(btn);
+      }
+    }
     tr.appendChild(td);
     return tr;
   }
 
-  _deviceRow(d) {
+  _emptyGroupRow(group) {
+    const tr = document.createElement("tr");
+    tr.className = "empty-group";
+    const td = document.createElement("td");
+    td.colSpan = COLUMNS.length + 1;
+    td.className = "sub";
+    td.append("No devices in this group yet. ");
+    const btn = document.createElement("button");
+    btn.className = "link-btn";
+    btn.dataset.action = "choose-devices";
+    btn.dataset.group = group.id;
+    btn.textContent = "Choose devices";
+    td.appendChild(btn);
+    tr.appendChild(td);
+    return tr;
+  }
+
+  _deviceRow(d, group) {
     const tr = document.createElement("tr");
     tr.className = "row";
     tr.classList.toggle("disabled", !!d.disabled);
@@ -335,6 +459,20 @@ export class ZigbeeOrchestratorPanel extends HTMLElement {
       this._batteryCell(d),
       this._statusCell(d),
     );
+    if (group) {
+      const td = document.createElement("td");
+      td.className = "remove";
+      const btn = document.createElement("button");
+      btn.className = "icon-btn";
+      btn.dataset.action = "remove-device";
+      btn.dataset.group = group.id;
+      btn.dataset.device = d.id;
+      btn.textContent = "✕";
+      btn.title = `Take ${d.name} out of ${group.name}`;
+      btn.setAttribute("aria-label", btn.title);
+      td.appendChild(btn);
+      tr.appendChild(td);
+    }
     return tr;
   }
 
@@ -382,9 +520,153 @@ export class ZigbeeOrchestratorPanel extends HTMLElement {
     return td;
   }
 
+  // -- the Groups page's name and delete bar ---------------------------
+
+  _renderEditBar() {
+    const bar = this._el("edit-bar");
+    const edit = this._view === "groups" ? this._edit : null;
+    bar.classList.toggle("open", !!edit);
+    bar.classList.toggle("danger", edit?.mode === "delete");
+    if (!edit) return;
+    const deleting = edit.mode === "delete";
+    this._el("edit-name").hidden = deleting;
+    this._el("edit-label").textContent = deleting
+      ? `Delete the group ${edit.group.name}? Only the group goes: its devices aren't changed.`
+      : edit.mode === "rename" ? `Rename ${edit.group.name}:` : "New group:";
+    const save = this._el("edit-save");
+    save.textContent = deleting ? "Delete group" : edit.mode === "rename" ? "Rename" : "Create";
+    save.classList.toggle("danger", deleting);
+  }
+
+  _openEdit(mode, group = null) {
+    this._edit = { mode, group };
+    this._el("edit-error").textContent = "";
+    const input = this._el("edit-name");
+    input.value = mode === "rename" ? group.name : "";
+    this._renderEditBar();
+    if (mode === "delete") this._el("edit-save").focus();
+    else {
+      input.focus();
+      input.select();
+    }
+  }
+
+  _closeEdit() {
+    this._edit = null;
+    this._renderEditBar();
+  }
+
+  async _saveEdit() {
+    const edit = this._edit;
+    if (!edit) return;
+    const name = this._el("edit-name").value;
+    const save = this._el("edit-save");
+    save.disabled = true;
+    try {
+      if (edit.mode === "create") {
+        const group = await this._call({ type: WS.GROUPS_CREATE, name });
+        this._closeEdit();
+        // Straight on to choosing its devices.
+        this._openPicker(group);
+      } else if (edit.mode === "rename") {
+        await this._call({ type: WS.GROUPS_RENAME, group_id: edit.group.id, name });
+        this._closeEdit();
+      } else {
+        await this._call({ type: WS.GROUPS_DELETE, group_id: edit.group.id });
+        this._st("groups").collapsed.delete(edit.group.id);
+        this._saveCollapsed();
+        this._closeEdit();
+      }
+    } catch (err) {
+      this._el("edit-error").textContent = err?.message || String(err);
+    } finally {
+      save.disabled = false;
+    }
+  }
+
+  // -- the device picker -----------------------------------------------
+
+  _openPicker(group) {
+    this._picking = { group, selected: new Set(group.device_ids) };
+    this._el("pick-title").textContent = `Choose the devices in ${group.name}`;
+    this._el("pick-filter").value = "";
+    this._el("pick-error").textContent = "";
+    this._renderPicker();
+    const dialog = this._el("picker");
+    if (!dialog.open) dialog.showModal();
+    this._el("pick-filter").focus();
+  }
+
+  // Every device, by name, ticked when it's in the group; the filter only
+  // hides devices, it doesn't untick them.
+  _renderPicker() {
+    if (!this._picking) return;
+    const { selected } = this._picking;
+    const words = wordsOf(this._el("pick-filter").value);
+    const list = this._el("pick-list");
+    list.textContent = "";
+    const frag = document.createDocumentFragment();
+    const devices = [...this._devices].sort((a, b) => byName(a, b) || String(a.ieee).localeCompare(String(b.ieee)));
+    let shown = 0;
+    for (const d of devices) {
+      if (!matches(d, words)) continue;
+      shown += 1;
+      const label = document.createElement("label");
+      label.className = "pick-row";
+      const cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.dataset.pick = d.id;
+      cb.checked = selected.has(d.id);
+      const name = document.createElement("span");
+      name.className = "pick-name";
+      name.textContent = d.name;
+      const sub = document.createElement("span");
+      sub.className = "sub";
+      sub.textContent = [d.area, d.manufacturer, d.model].filter(Boolean).join(" · ");
+      const info = document.createElement("span");
+      info.className = "pick-info";
+      info.append(name, sub);
+      label.append(cb, info);
+      if (!d.available) {
+        const chip = document.createElement("span");
+        chip.className = "chip offline";
+        chip.textContent = "Offline";
+        label.appendChild(chip);
+      }
+      frag.appendChild(label);
+    }
+    list.appendChild(frag);
+    if (!shown) {
+      const empty = document.createElement("div");
+      empty.className = "empty";
+      empty.textContent = this._devices.length ? "No devices match the filter." : "No Zigbee devices found.";
+      list.appendChild(empty);
+    }
+    this._el("pick-count").textContent = `${num(selected.size)} selected`;
+  }
+
+  async _savePicker() {
+    if (!this._picking) return;
+    const { group, selected } = this._picking;
+    const save = this._el("pick-save");
+    save.disabled = true;
+    try {
+      await this._call({ type: WS.GROUPS_SET_DEVICES, group_id: group.id, device_ids: [...selected] });
+      this._st("groups").collapsed.delete(group.id);
+      this._saveCollapsed();
+      this._el("picker").close();
+    } catch (err) {
+      this._el("pick-error").textContent = err?.message || String(err);
+    } finally {
+      save.disabled = false;
+    }
+  }
+
   // -- events ---------------------------------------------------------
 
-  _onClick(ev) {
+  _group(id) { return this._groups.find((g) => g.id === id); }
+
+  async _onClick(ev) {
     const path = ev.composedPath();
     const find = (key) => path.find((el) => el.dataset && el.dataset[key] !== undefined);
 
@@ -404,20 +686,67 @@ export class ZigbeeOrchestratorPanel extends HTMLElement {
       window.dispatchEvent(new CustomEvent("location-changed"));
       return;
     }
-    const action = find("action");
-    if (action?.dataset.action === "menu") {
-      this.dispatchEvent(new Event("hass-toggle-menu", { bubbles: true, composed: true }));
-      return;
-    }
-    if (action?.dataset.action === "toggle-groups") {
-      this._toggleAll();
-      return;
+    const actionEl = find("action");
+    if (actionEl) {
+      const group = actionEl.dataset.group ? this._group(actionEl.dataset.group) : null;
+      switch (actionEl.dataset.action) {
+        case "menu":
+          this.dispatchEvent(new Event("hass-toggle-menu", { bubbles: true, composed: true }));
+          return;
+        case "toggle-groups":
+          this._toggleAll();
+          return;
+        case "new-group":
+          this._openEdit("create");
+          return;
+        case "rename-group":
+          if (group) this._openEdit("rename", group);
+          return;
+        case "ask-delete-group":
+          if (group) this._openEdit("delete", group);
+          return;
+        case "edit-save":
+          this._saveEdit();
+          return;
+        case "edit-cancel":
+          this._closeEdit();
+          return;
+        case "choose-devices":
+          if (group) this._openPicker(group);
+          return;
+        case "remove-device":
+          if (group) {
+            try {
+              await this._call({ type: WS.GROUPS_REMOVE_DEVICES, group_id: group.id, device_ids: [actionEl.dataset.device] });
+            } catch (err) {
+              this._error = err?.message || String(err);
+              this._render();
+            }
+          }
+          return;
+        case "pick-all":
+        case "pick-none": {
+          const all = actionEl.dataset.action === "pick-all";
+          for (const cb of this._el("pick-list").querySelectorAll("input[data-pick]")) {
+            if (all) this._picking.selected.add(cb.dataset.pick);
+            else this._picking.selected.delete(cb.dataset.pick);
+          }
+          this._renderPicker();
+          return;
+        }
+        case "pick-save":
+          this._savePicker();
+          return;
+        case "pick-cancel":
+          this._el("picker").close();
+          return;
+        default:
+          return;
+      }
     }
     const view = find("view");
     if (view) {
-      this._view = view.dataset.view;
-      history.replaceState(history.state, "", `${window.location.pathname}${window.location.search}#${this._view}`);
-      this._render();
+      this._setView(view.dataset.view);
       return;
     }
     const sort = find("sort");
@@ -425,13 +754,31 @@ export class ZigbeeOrchestratorPanel extends HTMLElement {
       this._setSort(sort.dataset.sort);
       return;
     }
-    const group = find("groupToggle");
-    if (group) this._toggleGroup(group.dataset.groupToggle);
+    const groupRow = find("groupToggle");
+    if (groupRow) this._toggleGroup(groupRow.dataset.groupToggle);
+  }
+
+  _onChange(ev) {
+    const cb = ev.composedPath()[0];
+    if (cb.dataset?.pick === undefined || !this._picking) return;
+    if (cb.checked) this._picking.selected.add(cb.dataset.pick);
+    else this._picking.selected.delete(cb.dataset.pick);
+    this._el("pick-count").textContent = `${num(this._picking.selected.size)} selected`;
   }
 
   _onKeyDown(ev) {
-    if (ev.key !== "Enter" && ev.key !== " ") return;
     const target = ev.composedPath()[0];
+    if (target === this._el("edit-name")) {
+      if (ev.key === "Enter") {
+        ev.preventDefault();
+        this._saveEdit();
+      } else if (ev.key === "Escape") {
+        ev.preventDefault();
+        this._closeEdit();
+      }
+      return;
+    }
+    if (ev.key !== "Enter" && ev.key !== " ") return;
     if (target.matches?.("tr.group")) {
       ev.preventDefault();
       const group = target.dataset.groupToggle;
@@ -447,25 +794,28 @@ export class ZigbeeOrchestratorPanel extends HTMLElement {
 
   // The same column again reverses the order; a new one starts ascending.
   _setSort(key) {
-    this._sort = this._sort.key === key ? { key, dir: -this._sort.dir } : { key, dir: 1 };
+    const st = this._st();
+    st.sort = st.sort.key === key ? { key, dir: -st.sort.dir } : { key, dir: 1 };
     this._saveViewState();
     this._render();
   }
 
-  _toggleGroup(group) {
-    if (this._collapsed.has(group)) this._collapsed.delete(group);
-    else this._collapsed.add(group);
+  _toggleGroup(key) {
+    const { collapsed } = this._st();
+    if (collapsed.has(key)) collapsed.delete(key);
+    else collapsed.add(key);
     this._saveCollapsed();
     this._render();
   }
 
   // Collapses every group shown, or expands them all when they all are.
   _toggleAll() {
-    const groups = [...new Set(this._rows().map((r) => r.category))];
-    const allCollapsed = groups.every((g) => this._collapsed.has(g));
-    for (const g of groups) {
-      if (allCollapsed) this._collapsed.delete(g);
-      else this._collapsed.add(g);
+    const { collapsed } = this._st();
+    const keys = this._sections().map((s) => s.key);
+    const allCollapsed = keys.every((k) => collapsed.has(k));
+    for (const k of keys) {
+      if (allCollapsed) collapsed.delete(k);
+      else collapsed.add(k);
     }
     this._saveCollapsed();
     this._render();

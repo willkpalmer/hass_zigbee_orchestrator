@@ -119,6 +119,60 @@ a:hover { text-decoration: underline; }
 .footer { padding: 8px 16px 12px; color: var(--secondary-text-color, #727272); font-size: 12px; }
 .label { display: none; }
 
+/* The Groups page. */
+.hint { padding: 0 16px 10px; color: var(--secondary-text-color, #727272); font-size: 12px; flex: none; }
+tbody tr.group .group-link {
+  font: inherit; font-size: 12px; font-weight: 500; line-height: 1.5; white-space: nowrap; cursor: pointer;
+  margin-left: 12px; padding: 1px 8px; border-radius: 10px;
+  border: 1px solid var(--primary-color, #03a9f4); background: none; color: var(--primary-color, #03a9f4);
+}
+tbody tr.group .group-link + .group-link { margin-left: 6px; }
+tbody tr.group .group-link:hover { background: rgba(3, 169, 244, 0.1); }
+tbody tr.group .group-link.danger { color: var(--error-color, #db4437); border-color: var(--error-color, #db4437); }
+tbody tr.group .group-link.danger:hover { background: rgba(219, 68, 55, 0.12); }
+td.remove, th.remove { width: 40px; text-align: center; padding-left: 0; padding-right: 8px; }
+.icon-btn {
+  background: none; border: 0; cursor: pointer; font-size: 14px; line-height: 1; padding: 4px 6px; border-radius: 50%;
+  color: var(--secondary-text-color, #727272);
+}
+.icon-btn:hover { color: var(--error-color, #db4437); background: rgba(219, 68, 55, 0.1); }
+.link-btn { font: inherit; background: none; border: 0; padding: 0; cursor: pointer; color: var(--primary-color, #03a9f4); }
+.link-btn:hover { text-decoration: underline; }
+tr.empty-group td { padding: 10px 12px 10px 36px; }
+/* New group / Rename / Delete, under the toolbar. */
+.edit-bar {
+  display: none; align-items: center; flex-wrap: wrap; gap: 8px; padding: 10px 16px; flex: none;
+  background: rgba(3, 169, 244, 0.08); border-top: 1px solid var(--divider-color, #e0e0e0);
+}
+.edit-bar.open { display: flex; }
+.edit-bar.danger { background: rgba(219, 68, 55, 0.1); }
+.edit-bar input {
+  font: inherit; padding: 8px 10px; border-radius: 6px; flex: 1 1 220px; min-width: 160px;
+  border: 1px solid var(--divider-color, #ccc); background: var(--card-background-color, #fff); color: inherit;
+}
+.edit-bar .error, .picker .error { color: var(--error-color, #db4437); flex-basis: 100%; }
+.edit-bar .error:empty, .picker .error:empty { display: none; }
+.action.danger { border-color: var(--error-color, #db4437); background: var(--error-color, #db4437); }
+/* Choose devices. */
+.picker {
+  width: min(640px, calc(100vw - 32px)); max-height: min(80vh, 760px); padding: 0;
+  border: 1px solid var(--divider-color, #e0e0e0); border-radius: var(--ha-card-border-radius, 12px);
+  background: var(--card-background-color, #fff); color: var(--primary-text-color, #212121);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.3);
+}
+.picker[open] { display: flex; flex-direction: column; }
+.picker::backdrop { background: rgba(0, 0, 0, 0.4); }
+.picker h2 { font-size: 18px; font-weight: 500; margin: 0; padding: 16px 16px 4px; }
+.picker .toolbar { padding: 8px 16px; }
+.pick-list { flex: 1 1 auto; min-height: 0; overflow: auto; border-top: 1px solid var(--divider-color, #e0e0e0); border-bottom: 1px solid var(--divider-color, #e0e0e0); }
+.pick-row { display: flex; align-items: center; gap: 12px; padding: 8px 16px; cursor: pointer; }
+.pick-row:hover { background: var(--secondary-background-color, #f5f5f5); }
+.pick-row + .pick-row { border-top: 1px solid var(--divider-color, #e0e0e0); }
+.pick-info { display: flex; flex-direction: column; flex: 1 1 auto; min-width: 0; }
+.pick-name { word-break: break-word; }
+.picker .buttons { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 12px 16px; }
+input[type=checkbox] { width: 18px; height: 18px; cursor: pointer; accent-color: var(--primary-color, #03a9f4); flex: none; }
+
 /* Phones: one card per device; the column headers become sort buttons. */
 @media (max-width: 700px) {
   .content { padding: 8px; }
@@ -142,6 +196,11 @@ a:hover { text-decoration: underline; }
   tbody tr.row td:empty { display: none; }
   tbody tr.group { display: flex; align-items: center; }
   tbody tr.group td { display: block; flex: 1 1 auto; min-width: 0; line-height: 2; }
+  tbody tr.row td.remove { position: absolute; right: 8px; top: 8px; width: auto; }
+  tbody tr.row { position: relative; }
+  tr.empty-group { display: block; }
+  tr.empty-group td { display: block; border: 0; padding: 4px 12px 10px; }
+  thead th.remove { display: none; }
   .label { display: inline; }
   .header .summary { max-width: 45%; font-size: 12px; }
 }
@@ -165,6 +224,7 @@ export const TEMPLATE = `
 <div class="content">
   <nav class="views" aria-label="Pages">
     <button class="view" data-view="devices">Devices<span class="count" data-count="devices"></span></button>
+    <button class="view" data-view="groups">Groups<span class="count" data-count="groups"></span></button>
   </nav>
   <div class="card" data-el="devices-card">
     <div class="notice" data-el="notice" hidden>
@@ -174,6 +234,18 @@ export const TEMPLATE = `
       <input type="search" data-el="filter" aria-label="Filter" placeholder="Filter by name, area, manufacturer or model" title="Filter (press / to jump here)">
       <span class="spacer"></span>
       <button class="action secondary" data-action="toggle-groups" title="Collapse or expand every group">Collapse all</button>
+      <button class="action" data-action="new-group" data-only-view="groups" title="Make a group of devices, to find them easily">New group</button>
+    </div>
+    <div class="hint" data-el="hint" hidden>
+      Groups here are only for finding and viewing devices. They aren't Zigbee groups: making or changing them
+      doesn't change anything in ZHA or on the devices, and a device can be in any number of them.
+    </div>
+    <div class="edit-bar" data-el="edit-bar">
+      <span data-el="edit-label"></span>
+      <input type="text" data-el="edit-name" maxlength="100" aria-label="Group name" placeholder="Group name, e.g. Upstairs sensors">
+      <button class="action secondary" data-action="edit-cancel">Cancel</button>
+      <button class="action" data-action="edit-save" data-el="edit-save">Create</button>
+      <span class="error" data-el="edit-error" role="alert"></span>
     </div>
     <div class="table-wrap" data-el="scroll">
       <table>
@@ -185,4 +257,20 @@ export const TEMPLATE = `
     <div class="footer" data-el="footer"></div>
   </div>
 </div>
+<dialog class="picker" data-el="picker" aria-labelledby="pick-title">
+  <h2 id="pick-title" data-el="pick-title"></h2>
+  <div class="toolbar">
+    <input type="search" data-el="pick-filter" aria-label="Filter devices" placeholder="Filter by name, area, manufacturer or model">
+    <button class="action secondary" data-action="pick-all" title="Tick every device shown">Select shown</button>
+    <button class="action secondary" data-action="pick-none" title="Untick every device shown">Clear shown</button>
+  </div>
+  <div class="pick-list" data-el="pick-list"></div>
+  <div class="buttons">
+    <span class="sub" data-el="pick-count"></span>
+    <span class="spacer"></span>
+    <span class="error" data-el="pick-error" role="alert"></span>
+    <button class="action secondary" data-action="pick-cancel">Cancel</button>
+    <button class="action" data-action="pick-save" data-el="pick-save">Save</button>
+  </div>
+</dialog>
 `;

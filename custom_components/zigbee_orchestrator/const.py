@@ -21,3 +21,7 @@ ROLE_COORDINATOR = "coordinator"
 ROLE_ROUTER = "router"
 ROLE_END_DEVICE = "end_device"
 ROLE_UNKNOWN = "unknown"
+
+# The device groups made on the Groups page (groups.py): only for finding
+# devices, nothing to do with ZHA's own Zigbee groups.
+DATA_GROUPS = f"{DOMAIN}_groups"

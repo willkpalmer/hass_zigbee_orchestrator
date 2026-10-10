@@ -3,6 +3,12 @@
 
 export const WS = {
   DEVICES_SUBSCRIBE: "zigbee_orchestrator/devices/subscribe",
+  GROUPS_SUBSCRIBE: "zigbee_orchestrator/groups/subscribe",
+  GROUPS_CREATE: "zigbee_orchestrator/groups/create",
+  GROUPS_RENAME: "zigbee_orchestrator/groups/rename",
+  GROUPS_DELETE: "zigbee_orchestrator/groups/delete",
+  GROUPS_SET_DEVICES: "zigbee_orchestrator/groups/set_devices",
+  GROUPS_REMOVE_DEVICES: "zigbee_orchestrator/groups/remove_devices",
 };
 
 // The device groups, in this order (each device's "category", see
