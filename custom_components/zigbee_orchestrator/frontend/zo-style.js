@@ -102,6 +102,7 @@ tbody tr.group { cursor: pointer; user-select: none; }
 tbody tr.group .caret { display: inline-block; width: 1.2em; color: var(--secondary-text-color, #727272); }
 tbody tr.group .group-count { font-weight: 400; color: var(--secondary-text-color, #727272); }
 tbody tr.group.offline td { color: var(--error-color, #db4437); }
+tbody tr.group.ungrouped td { color: var(--secondary-text-color, #727272); }
 tbody tr.row.disabled td { opacity: 0.6; }
 a { color: var(--primary-color, #03a9f4); text-decoration: none; }
 a:hover { text-decoration: underline; }

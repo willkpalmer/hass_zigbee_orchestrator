@@ -13,6 +13,8 @@ const {
 const { STYLE, TEMPLATE } = await import(`./zo-style.js${V}`);
 
 const VIEWS = ["devices", "groups"];
+// The Groups page's last heading: the devices in no group.
+const UNGROUPED = "__ungrouped__";
 const CATEGORY_LABELS = Object.fromEntries(CATEGORIES);
 
 const text = (v) => String(v ?? "").toLocaleLowerCase();
@@ -232,7 +234,8 @@ export class ZigbeeOrchestratorPanel extends HTMLElement {
 
   // The current page's groups of rows: { key, label, cls, rows, group? }.
   // Devices: by category (offline apart), only those with devices. Groups:
-  // every group by name (while filtering, only those with a match).
+  // every group by name (while filtering, only those with a match), then
+  // Ungrouped - the devices in no group - when there are any.
   _sections() {
     const words = wordsOf(this._st().filter);
     if (this._view === "devices") {
@@ -242,7 +245,13 @@ export class ZigbeeOrchestratorPanel extends HTMLElement {
         .filter((s) => s.rows.length);
     }
     const byId = new Map(this._devices.map((d) => [d.id, d]));
-    return this._groups
+    const grouped = new Set(this._groups.flatMap((g) => g.device_ids));
+    const ungrouped = this._devices.filter((d) => !grouped.has(d.id));
+    const rest = {
+      key: UNGROUPED, label: "Ungrouped", cls: "ungrouped", ungrouped: true, total: ungrouped.length,
+      rows: this._sorted(ungrouped.filter((d) => matches(d, words))),
+    };
+    const sections = this._groups
       .map((group) => {
         const members = group.device_ids.map((id) => byId.get(id)).filter(Boolean);
         return {
@@ -251,6 +260,8 @@ export class ZigbeeOrchestratorPanel extends HTMLElement {
         };
       })
       .filter((s) => !words.length || s.rows.length);
+    if (rest.rows.length) sections.push(rest);
+    return sections;
   }
 
   _render() {
@@ -288,7 +299,7 @@ export class ZigbeeOrchestratorPanel extends HTMLElement {
       const isCollapsed = collapsed.has(section.key);
       frag.appendChild(this._groupRow(section, isCollapsed));
       if (isCollapsed) continue;
-      for (const d of section.rows) frag.appendChild(this._deviceRow(d, section.group));
+      for (const d of section.rows) frag.appendChild(this._deviceRow(d, section.group, isGroups));
       if (section.group && !section.rows.length) frag.appendChild(this._emptyGroupRow(section.group));
     }
     body.appendChild(frag);
@@ -371,17 +382,17 @@ export class ZigbeeOrchestratorPanel extends HTMLElement {
     tr.setAttribute("aria-expanded", String(!collapsed));
     tr.title = collapsed ? "Show these devices (Enter)" : "Hide these devices (Enter)";
     const td = document.createElement("td");
-    td.colSpan = COLUMNS.length + (section.group ? 1 : 0);
+    td.colSpan = COLUMNS.length + (this._view === "groups" ? 1 : 0);
     const caret = document.createElement("span");
     caret.className = "caret";
     caret.textContent = collapsed ? "▸" : "▾";
     const count = document.createElement("span");
     count.className = "group-count";
-    const filtered = section.group && section.rows.length !== section.total;
+    const filtered = (section.group || section.ungrouped) && section.rows.length !== section.total;
     count.textContent = filtered
       ? ` (${num(section.rows.length)} of ${num(section.total)})`
       : ` (${num(section.rows.length)})`;
-    td.append(caret, section.group ? section.label : CATEGORY_LABELS[section.key] || section.label, count);
+    td.append(caret, section.group || section.ungrouped ? section.label : CATEGORY_LABELS[section.key], count);
     if (section.group) {
       for (const [action, label, title] of [
         ["choose-devices", "Choose devices", "Add devices to this group, or take them out"],
@@ -418,7 +429,9 @@ export class ZigbeeOrchestratorPanel extends HTMLElement {
     return tr;
   }
 
-  _deviceRow(d, group) {
+  // On the Groups page, a row has a last column: ✕ (take it out of the
+  // group), or nothing under Ungrouped.
+  _deviceRow(d, group, groupsPage = false) {
     const tr = document.createElement("tr");
     tr.className = "row";
     tr.classList.toggle("disabled", !!d.disabled);
@@ -471,6 +484,10 @@ export class ZigbeeOrchestratorPanel extends HTMLElement {
       btn.title = `Take ${d.name} out of ${group.name}`;
       btn.setAttribute("aria-label", btn.title);
       td.appendChild(btn);
+      tr.appendChild(td);
+    } else if (groupsPage) {
+      const td = document.createElement("td");
+      td.className = "remove";
       tr.appendChild(td);
     }
     return tr;

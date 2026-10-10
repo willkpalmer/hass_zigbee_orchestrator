@@ -52,7 +52,8 @@ groups, and deleting a group never touches its devices.
 - **Rename** and **Delete** on a group's heading.
 
 Each group is listed with the same columns as the Devices page, sorted by
-name, and can be collapsed like the Devices page's groups. The filter box
+name, and can be collapsed like the Devices page's groups. Every device
+that isn't in any group is listed last, under **Ungrouped**. The filter box
 narrows every group to the devices that match. Groups are kept in Home
 Assistant's storage (`.storage/zigbee_orchestrator.groups`), and a device
 removed from Home Assistant leaves its groups by itself.

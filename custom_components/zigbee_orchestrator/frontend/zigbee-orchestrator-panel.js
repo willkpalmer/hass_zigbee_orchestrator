@@ -21,7 +21,8 @@
 //             is changed in ZHA or on the devices. Each group can be
 //             renamed, deleted and collapsed, and its devices chosen from
 //             a list of every device (Choose devices) or taken out one by
-//             one.
+//             one. The devices in no group are listed last, under
+//             Ungrouped.
 //
 // The device list and the groups are each subscribed to once over the
 // WebSocket (zigbee_orchestrator/devices/subscribe, .../groups/subscribe)
