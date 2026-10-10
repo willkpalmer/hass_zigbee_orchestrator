@@ -8,6 +8,7 @@ export const WS = {
   GROUPS_RENAME: "zigbee_orchestrator/groups/rename",
   GROUPS_DELETE: "zigbee_orchestrator/groups/delete",
   GROUPS_SET_DEVICES: "zigbee_orchestrator/groups/set_devices",
+  GROUPS_ADD_DEVICES: "zigbee_orchestrator/groups/add_devices",
   GROUPS_REMOVE_DEVICES: "zigbee_orchestrator/groups/remove_devices",
 };
 

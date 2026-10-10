@@ -62,6 +62,8 @@ export class ZigbeeOrchestratorPanel extends HTMLElement {
     this._edit = null;
     // The group whose devices are being chosen, and the ticked devices.
     this._picking = null;
+    // The Ungrouped devices ticked on the Groups page, to add to a group.
+    this._selected = new Set();
     // Each page's search, sort and collapsed groups, as left last time.
     const saved = loadJSON(VIEW_STATE_KEY, {});
     const collapsed = loadJSON(COLLAPSED_KEY, {});
@@ -292,6 +294,14 @@ export class ZigbeeOrchestratorPanel extends HTMLElement {
     this._renderEditBar();
 
     const sections = this._sections();
+    this._pruneSelection(sections);
+    this._renderSelectBar();
+    // "New group with these" follows the selection.
+    if (this._edit?.deviceIds) {
+      if (this._selected.size) this._edit.deviceIds = [...this._selected];
+      else this._edit = null;
+      this._renderEditBar();
+    }
     this._renderHead();
     const body = this._el("body");
     body.textContent = "";
@@ -394,7 +404,22 @@ export class ZigbeeOrchestratorPanel extends HTMLElement {
     count.textContent = filtered
       ? ` (${num(section.rows.length)} of ${num(section.total)})`
       : ` (${num(section.rows.length)})`;
-    td.append(caret, section.group || section.ungrouped ? section.label : CATEGORY_LABELS[section.key], count);
+    if (section.ungrouped && !collapsed) {
+      // Ticks every Ungrouped device shown.
+      const all = document.createElement("input");
+      all.type = "checkbox";
+      all.className = "select";
+      all.dataset.selectAll = "";
+      const ticked = section.rows.filter((d) => this._selected.has(d.id)).length;
+      all.checked = ticked > 0 && ticked === section.rows.length;
+      all.indeterminate = ticked > 0 && ticked < section.rows.length;
+      all.title = "Select every ungrouped device shown, to add them to a group";
+      all.setAttribute("aria-label", all.title);
+      td.append(caret, all);
+    } else {
+      td.append(caret);
+    }
+    td.append(section.group || section.ungrouped ? section.label : CATEGORY_LABELS[section.key], count);
     if (section.group) {
       for (const [action, label, title] of [
         ["choose-devices", "Choose devices", "Add devices to this group, or take them out"],
@@ -441,6 +466,17 @@ export class ZigbeeOrchestratorPanel extends HTMLElement {
 
     const name = document.createElement("td");
     name.className = "name";
+    if (groupsPage && !group) {
+      // Ungrouped: ticked to add to a group.
+      const cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.className = "select";
+      cb.dataset.select = d.id;
+      cb.checked = this._selected.has(d.id);
+      cb.setAttribute("aria-label", `Select ${d.name}`);
+      name.appendChild(cb);
+      tr.classList.toggle("selected", cb.checked);
+    }
     const link = document.createElement("a");
     link.href = `/config/devices/device/${encodeURIComponent(d.id)}`;
     link.dataset.nav = "";
@@ -539,6 +575,50 @@ export class ZigbeeOrchestratorPanel extends HTMLElement {
     return td;
   }
 
+  // -- the Groups page's selected Ungrouped devices ----------------------
+
+  // Only devices shown under Ungrouped stay selected (not those put in a
+  // group meanwhile, or hidden by the filter).
+  _pruneSelection(sections) {
+    if (this._view !== "groups" || !this._selected.size) return;
+    const rest = sections.find((s) => s.ungrouped);
+    const shown = new Set(this._st().collapsed.has(UNGROUPED) ? [] : (rest?.rows || []).map((d) => d.id));
+    for (const id of [...this._selected]) if (!shown.has(id)) this._selected.delete(id);
+  }
+
+  _renderSelectBar() {
+    const bar = this._el("select-bar");
+    const n = this._view === "groups" ? this._selected.size : 0;
+    bar.classList.toggle("open", n > 0);
+    if (!n) return;
+    this._el("select-count").textContent = `${num(n)} ${n === 1 ? "device" : "devices"} selected`;
+    const select = this._el("select-group");
+    const was = select.value;
+    select.replaceChildren(...this._groups.map((g) => new Option(g.name, g.id)));
+    if (this._groups.some((g) => g.id === was)) select.value = was;
+    for (const el of bar.querySelectorAll("[data-needs-groups]")) el.hidden = !this._groups.length;
+  }
+
+  async _addSelected() {
+    const group = this._group(this._el("select-group").value);
+    if (!group || !this._selected.size) return;
+    const ids = [...this._selected];
+    const btn = this.shadowRoot.querySelector('[data-action="add-selected"]');
+    btn.disabled = true;
+    this._el("select-error").textContent = "";
+    try {
+      await this._call({ type: WS.GROUPS_ADD_DEVICES, group_id: group.id, device_ids: ids });
+      for (const id of ids) this._selected.delete(id);
+      this._st("groups").collapsed.delete(group.id);
+      this._saveCollapsed();
+      this._render();
+    } catch (err) {
+      this._el("select-error").textContent = err?.message || String(err);
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
   // -- the Groups page's name and delete bar ---------------------------
 
   _renderEditBar() {
@@ -551,14 +631,18 @@ export class ZigbeeOrchestratorPanel extends HTMLElement {
     this._el("edit-name").hidden = deleting;
     this._el("edit-label").textContent = deleting
       ? `Delete the group ${edit.group.name}? Only the group goes: its devices aren't changed.`
-      : edit.mode === "rename" ? `Rename ${edit.group.name}:` : "New group:";
+      : edit.mode === "rename" ? `Rename ${edit.group.name}:`
+        : edit.deviceIds?.length
+          ? `New group with the ${num(edit.deviceIds.length)} selected ${edit.deviceIds.length === 1 ? "device" : "devices"}:`
+          : "New group:";
     const save = this._el("edit-save");
     save.textContent = deleting ? "Delete group" : edit.mode === "rename" ? "Rename" : "Create";
     save.classList.toggle("danger", deleting);
   }
 
-  _openEdit(mode, group = null) {
-    this._edit = { mode, group };
+  // deviceIds: a new group's devices (the selected Ungrouped devices).
+  _openEdit(mode, group = null, deviceIds = null) {
+    this._edit = { mode, group, deviceIds };
     this._el("edit-error").textContent = "";
     const input = this._el("edit-name");
     input.value = mode === "rename" ? group.name : "";
@@ -583,10 +667,16 @@ export class ZigbeeOrchestratorPanel extends HTMLElement {
     save.disabled = true;
     try {
       if (edit.mode === "create") {
-        const group = await this._call({ type: WS.GROUPS_CREATE, name });
+        const deviceIds = edit.deviceIds || [];
+        const group = await this._call({ type: WS.GROUPS_CREATE, name, device_ids: deviceIds });
         this._closeEdit();
-        // Straight on to choosing its devices.
-        this._openPicker(group);
+        if (deviceIds.length) {
+          for (const id of deviceIds) this._selected.delete(id);
+          this._render();
+        } else {
+          // Straight on to choosing its devices.
+          this._openPicker(group);
+        }
       } else if (edit.mode === "rename") {
         await this._call({ type: WS.GROUPS_RENAME, group_id: edit.group.id, name });
         this._closeEdit();
@@ -698,6 +788,7 @@ export class ZigbeeOrchestratorPanel extends HTMLElement {
     const path = ev.composedPath();
     const find = (key) => path.find((el) => el.dataset && el.dataset[key] !== undefined);
 
+    if (find("select") || find("selectAll")) return;
     const moreInfo = find("moreInfo");
     if (moreInfo) {
       ev.preventDefault();
@@ -726,6 +817,16 @@ export class ZigbeeOrchestratorPanel extends HTMLElement {
           return;
         case "new-group":
           this._openEdit("create");
+          return;
+        case "new-group-selected":
+          if (this._selected.size) this._openEdit("create", null, [...this._selected]);
+          return;
+        case "add-selected":
+          this._addSelected();
+          return;
+        case "clear-selection":
+          this._selected.clear();
+          this._render();
           return;
         case "rename-group":
           if (group) this._openEdit("rename", group);
@@ -788,6 +889,21 @@ export class ZigbeeOrchestratorPanel extends HTMLElement {
 
   _onChange(ev) {
     const cb = ev.composedPath()[0];
+    if (cb.dataset?.select !== undefined) {
+      if (cb.checked) this._selected.add(cb.dataset.select);
+      else this._selected.delete(cb.dataset.select);
+      this._render();
+      return;
+    }
+    if (cb.dataset?.selectAll !== undefined) {
+      const rest = this._sections().find((s) => s.ungrouped);
+      for (const d of rest?.rows || []) {
+        if (cb.checked) this._selected.add(d.id);
+        else this._selected.delete(d.id);
+      }
+      this._render();
+      return;
+    }
     if (cb.dataset?.pick === undefined || !this._picking) return;
     if (cb.checked) this._picking.selected.add(cb.dataset.pick);
     else this._picking.selected.delete(cb.dataset.pick);
@@ -831,7 +947,11 @@ export class ZigbeeOrchestratorPanel extends HTMLElement {
   _toggleGroup(key) {
     const { collapsed } = this._st();
     if (collapsed.has(key)) collapsed.delete(key);
-    else collapsed.add(key);
+    else {
+      collapsed.add(key);
+      // Nothing hidden stays selected.
+      if (key === UNGROUPED) this._selected.clear();
+    }
     this._saveCollapsed();
     this._render();
   }
@@ -845,6 +965,7 @@ export class ZigbeeOrchestratorPanel extends HTMLElement {
       if (allCollapsed) collapsed.delete(k);
       else collapsed.add(k);
     }
+    if (!allCollapsed) this._selected.clear();
     this._saveCollapsed();
     this._render();
   }

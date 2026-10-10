@@ -140,6 +140,22 @@ td.remove, th.remove { width: 40px; text-align: center; padding-left: 0; padding
 .link-btn { font: inherit; background: none; border: 0; padding: 0; cursor: pointer; color: var(--primary-color, #03a9f4); }
 .link-btn:hover { text-decoration: underline; }
 tr.empty-group td { padding: 10px 12px 10px 36px; }
+/* The selected Ungrouped devices: add them to a group, or make one. */
+.select-bar {
+  display: none; align-items: center; flex-wrap: wrap; gap: 8px; padding: 10px 16px; flex: none;
+  background: rgba(3, 169, 244, 0.08); border-top: 1px solid var(--divider-color, #e0e0e0);
+}
+.select-bar.open { display: flex; }
+.select-bar .select-count { font-weight: 500; margin-right: 8px; }
+.select-bar label { display: inline-flex; align-items: center; gap: 6px; }
+.select-bar select {
+  font: inherit; padding: 8px 10px; border-radius: 6px; max-width: 260px;
+  border: 1px solid var(--divider-color, #ccc); background: var(--card-background-color, #fff); color: inherit;
+}
+.select-bar .error { color: var(--error-color, #db4437); flex-basis: 100%; }
+.select-bar .error:empty { display: none; }
+input.select { margin: 0 10px 0 0; vertical-align: -3px; }
+tbody tr.row.selected { background: rgba(3, 169, 244, 0.1); }
 /* New group / Rename / Delete, under the toolbar. */
 .edit-bar {
   display: none; align-items: center; flex-wrap: wrap; gap: 8px; padding: 10px 16px; flex: none;
@@ -242,6 +258,16 @@ export const TEMPLATE = `
     <div class="hint" data-el="hint" hidden>
       Groups here are only for finding and viewing devices. They aren't Zigbee groups: making or changing them
       doesn't change anything in ZHA or on the devices. A device can be in only one group.
+    </div>
+    <div class="select-bar" data-el="select-bar">
+      <span class="select-count" data-el="select-count"></span>
+      <label data-needs-groups>Add to
+        <select data-el="select-group" aria-label="Group to add them to"></select>
+      </label>
+      <button class="action" data-action="add-selected" data-needs-groups title="Add the selected devices to this group">Add to group</button>
+      <button class="action secondary" data-action="new-group-selected" title="Make a new group of the selected devices">New group with these</button>
+      <button class="action secondary" data-action="clear-selection">Clear selection</button>
+      <span class="error" data-el="select-error" role="alert"></span>
     </div>
     <div class="edit-bar" data-el="edit-bar">
       <span data-el="edit-label"></span>

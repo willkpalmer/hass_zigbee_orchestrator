@@ -55,7 +55,11 @@ its devices. A device can be in only one group.
 
 Each group is listed with the same columns as the Devices page, sorted by
 name, and can be collapsed like the Devices page's groups. Every device
-that isn't in any group is listed last, under **Ungrouped**. The filter box
+that isn't in any group is listed last, under **Ungrouped**.
+
+Ungrouped devices can be ticked (or all of them at once, with the box on
+the Ungrouped heading). Then either pick a group and **Add to group**, or
+**New group with these** to name a new group made of them. The filter box
 narrows every group to the devices that match. Groups are kept in Home
 Assistant's storage (`.storage/zigbee_orchestrator.groups`), and a device
 removed from Home Assistant leaves its groups by itself.
