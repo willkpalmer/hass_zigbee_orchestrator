@@ -30,19 +30,18 @@ const byName = byText("name");
 const COLUMNS = [
   { key: "name", label: "Device name", compare: byName, cls: "name" },
   { key: "area", label: "Area", compare: byText("area") },
-  { key: "manufacturer", label: "Manufacturer", compare: byText("manufacturer"), views: ["groups"] },
   { key: "model", label: "Model", compare: byText("model") },
   { key: "battery", label: "Battery", compare: byBattery, cls: "num" },
   {
-    key: "parent_name", label: "Connected to", compare: byText("parent_name"), views: ["devices"],
+    key: "parent_name", label: "Connected to", compare: byText("parent_name"),
     title: "The router or coordinator each online end device is connected to, as of ZHA's last network scan (every few hours)",
   },
   {
-    key: "lqi", label: "LQI", compare: byNumber("lqi"), cls: "num", views: ["devices"],
+    key: "lqi", label: "LQI", compare: byNumber("lqi"), cls: "num",
     title: "Link quality of the last message heard from the device, 0-255: red below 80, amber below 150, green from 150",
   },
   {
-    key: "rssi", label: "RSSI", compare: byNumber("rssi"), cls: "num", views: ["devices"],
+    key: "rssi", label: "RSSI", compare: byNumber("rssi"), cls: "num",
     title: "Signal strength of the last message heard from the device, in dBm: red below -80, amber below -65, green from -65",
   },
   { key: "available", label: "Status", compare: byStatus },
@@ -525,16 +524,14 @@ export class ZigbeeOrchestratorPanel extends HTMLElement {
       name,
       cell("Area", d.area),
     );
-    if (groupsPage) tr.append(cell("Manufacturer", d.manufacturer));
-    tr.append(cell("Model", d.model), this._batteryCell(d));
-    if (!groupsPage) {
-      tr.append(
-        this._parentCell(d),
-        this._signalCell("lqi", "LQI", d.lqi, d),
-        this._signalCell("rssi", "RSSI", d.rssi, d, " dBm"),
-      );
-    }
-    tr.append(this._statusCell(d));
+    tr.append(
+      cell("Model", d.model),
+      this._batteryCell(d),
+      this._parentCell(d),
+      this._signalCell("lqi", "LQI", d.lqi, d),
+      this._signalCell("rssi", "RSSI", d.rssi, d, " dBm"),
+      this._statusCell(d),
+    );
     if (group) {
       const td = document.createElement("td");
       td.className = "remove";

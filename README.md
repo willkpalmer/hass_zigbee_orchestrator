@@ -23,7 +23,7 @@ devices are sorted by name - click a column heading to sort by it instead.
 |---|---|
 | Device name | The name you gave the device, or ZHA's. Opens the device's page. |
 | Area | The device's area. |
-| Model | As ZHA reports it. (The manufacturer isn't shown here, but the filter still finds it; the Groups page shows it.) |
+| Model | As ZHA reports it. (The manufacturer isn't shown, but the filter still finds it.) |
 | Battery | The battery level, from the device's battery sensor, or Low/OK for devices that only report a low battery. Opens the battery's history. "—" for mains-powered devices. |
 | Connected to | For an online end device, the router or coordinator it's connected to (its parent), linking to that device's page. It comes from ZHA's network scan, which reads every router's neighbour table every 4 hours by default, so it can lag behind a device that has just moved. "—" for routers and the coordinator (they're part of the mesh rather than connected to one device), offline devices, and end devices not in any table yet. |
 | LQI | Link quality of the last message heard from the device (0-255). |
@@ -53,8 +53,9 @@ Battery, LQI and RSSI readings are coloured by strength:
 | RSSI | below -80 dBm | -80 to -66 dBm | -65 dBm or more |
 
 An offline device's LQI and RSSI are the last ones heard, shown faded.
-The coordinator has no LQI or RSSI of its own. The Groups page shows the
-battery column (coloured the same way) but not LQI or RSSI.
+The coordinator has no LQI or RSSI of its own. The Groups page has the
+same columns, coloured the same way, and the same Refresh connections
+button.
 
 The list updates live: devices going offline or coming back, new battery
 readings, renames and area changes appear straight away. The filter box

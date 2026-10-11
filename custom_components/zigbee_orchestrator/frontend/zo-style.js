@@ -259,8 +259,8 @@ export const TEMPLATE = `
     <div class="toolbar">
       <input type="search" data-el="filter" aria-label="Filter" placeholder="Filter by name, area, manufacturer or model" title="Filter (press / to jump here)">
       <span class="spacer"></span>
-      <span class="scan-status sub" data-el="scan-status" data-only-view="devices" role="status" aria-live="polite"></span>
-      <button class="action secondary" data-action="scan" data-el="scan" data-only-view="devices"
+      <span class="scan-status sub" data-el="scan-status" data-only-view="devices groups" role="status" aria-live="polite"></span>
+      <button class="action secondary" data-action="scan" data-el="scan" data-only-view="devices groups"
         title="Have ZHA re-read which router or coordinator each end device is connected to now, rather than at its next scan (every 4 hours by default). Takes from a few seconds to a few minutes.">Refresh connections</button>
       <button class="action secondary" data-action="toggle-groups" title="Collapse or expand every group">Collapse all</button>
       <button class="action" data-action="new-group" data-only-view="groups" title="Make a group of devices, to find them easily">New group</button>
