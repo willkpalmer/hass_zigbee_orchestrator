@@ -92,6 +92,7 @@ th .arrow { display: inline-block; width: 1em; }
 td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 th.num { text-align: right; }
 td.name { min-width: 200px; word-break: break-word; }
+td.parent { min-width: 120px; word-break: break-word; }
 tbody tr.row:hover { background: var(--secondary-background-color, rgba(0,0,0,0.03)); }
 tbody tr.group:focus { outline: none; }
 tbody tr.group:focus-visible { outline: 2px solid var(--primary-color, #03a9f4); outline-offset: -2px; }

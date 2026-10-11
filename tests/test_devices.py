@@ -71,8 +71,8 @@ async def test_device_list(hass):
     network = {
         coordinator.id: ZhaDevice(role="coordinator", available=True, mains_powered=True),
         plug.id: ZhaDevice(role="router", available=True, lqi=200, rssi=-61, last_seen=0.0, mains_powered=True),
-        sensor.id: ZhaDevice(role="end_device", available=True, last_seen=1_700_000_000.0),
-        remote.id: ZhaDevice(role="end_device", available=False),
+        sensor.id: ZhaDevice(role="end_device", available=True, last_seen=1_700_000_000.0, parent_id=plug.id),
+        remote.id: ZhaDevice(role="end_device", available=False, parent_id=plug.id),
     }
     records = {r["name"]: r for r in build_device_list(hass, network)}
 
@@ -94,6 +94,10 @@ async def test_device_list(hass):
     r = records["Remote"]
     assert (r["role"], r["available"], r["category"]) == ("end_device", False, "offline")
     assert (r["battery"], r["battery_low"]) == (None, True)
+    # Where an online end device is connected; not for an offline one.
+    assert (s["parent_id"], s["parent_name"]) == (plug.id, "Plug")
+    assert (r["parent_id"], r["parent_name"]) == (None, None)
+    assert records["Plug"]["parent_id"] is None
 
 
 async def test_unavailable_battery_reading(hass):
@@ -124,7 +128,8 @@ async def test_zha_network(hass, monkeypatch):
     import types
 
     class Device:
-        def __init__(self, device_type, available, active=False):
+        def __init__(self, ieee, device_type, available, active=False):
+            self.ieee = ieee
             self.device_type = device_type
             self.available = available
             self.is_active_coordinator = active
@@ -143,21 +148,48 @@ async def test_zha_network(hass, monkeypatch):
             # As ZHA's proxy before the device is in the device registry.
             raise AttributeError(name)
 
+    def neighbor(ieee, relationship):
+        return types.SimpleNamespace(ieee=ieee, relationship=types.SimpleNamespace(name=relationship))
+
     proxies = {
-        1: Proxy("coordinator", Device("Coordinator", True, active=True)),
-        2: Proxy("router", Device("Router", False)),
-        3: Proxy(None, Device("EndDevice", True)),
+        1: Proxy("coordinator", Device("00:00:00:00:00:00:00:01", "Coordinator", True, active=True)),
+        2: Proxy("router", Device("00:00:00:00:00:00:00:02", "Router", False)),
+        3: Proxy(None, Device("00:00:00:00:00:00:00:03", "EndDevice", True)),
+        4: Proxy("sensor", Device("00:00:00:00:00:00:00:0A", "EndDevice", True)),
+        5: Proxy("button", Device("00:00:00:00:00:00:00:0b", "EndDevice", True)),
     }
+    # zigpy's topology: each router's neighbour table, by its IEEE address.
+    neighbors = {
+        "00:00:00:00:00:00:00:01": [
+            neighbor("00:00:00:00:00:00:00:02", "Sibling"),
+            neighbor("00:00:00:00:00:00:00:0b", "Child"),
+        ],
+        "00:00:00:00:00:00:00:02": [
+            neighbor("00:00:00:00:00:00:00:0a", "Child"),
+            neighbor("00:00:00:00:00:00:00:01", "Parent"),
+        ],
+    }
+    gateway = types.SimpleNamespace(
+        application_controller=types.SimpleNamespace(topology=types.SimpleNamespace(neighbors=neighbors))
+    )
     helpers = types.ModuleType("homeassistant.components.zha.helpers")
-    helpers.get_zha_gateway_proxy = lambda _hass: types.SimpleNamespace(device_proxies=proxies)
+    helpers.get_zha_gateway_proxy = lambda _hass: types.SimpleNamespace(device_proxies=proxies, gateway=gateway)
     monkeypatch.setitem(sys.modules, "homeassistant.components.zha.helpers", helpers)
     hass.config.components.add("zha")
 
-    network = zha_network(hass)
-    assert network == {
-        "coordinator": ZhaDevice(role="coordinator", available=True, lqi=255, rssi=-70, last_seen=1.0, mains_powered=True),
-        "router": ZhaDevice(role="router", available=False, lqi=255, rssi=-70, last_seen=1.0, mains_powered=True),
+    common = {"lqi": 255, "rssi": -70, "last_seen": 1.0, "mains_powered": True}
+    assert zha_network(hass) == {
+        "coordinator": ZhaDevice(role="coordinator", available=True, **common),
+        "router": ZhaDevice(role="router", available=False, **common),
+        # Children in a router's (or the coordinator's) table, whatever
+        # the case of their IEEE address.
+        "sensor": ZhaDevice(role="end_device", available=True, parent_id="router", **common),
+        "button": ZhaDevice(role="end_device", available=True, parent_id="coordinator", **common),
     }
+
+    # No topology (an older ZHA): no parents, the rest as before.
+    gateway.application_controller = None
+    assert zha_network(hass)["sensor"].parent_id is None
 
 
 async def test_subscription_sends_changes(hass, monkeypatch):

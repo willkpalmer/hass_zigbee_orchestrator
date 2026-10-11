@@ -4,9 +4,10 @@ Each device comes from Home Assistant's device registry (every device ZHA
 registers carries a ("zha", <IEEE address>) identifier), with its name,
 area, manufacturer and model as shown on the device's own page, and its
 battery level from its battery sensor. What only ZHA knows - the device's
-role on the network (coordinator, router or end device) and whether it's
-online - comes from ZHA's running gateway (see zha_network). When ZHA isn't
-running, every device is listed as offline.
+role on the network (coordinator, router or end device), whether it's
+online, its signal, and which router or coordinator an end device is
+connected to - comes from ZHA's running gateway (see zha_network). When
+ZHA isn't running, every device is listed as offline.
 
 Each device is put in one category, which the panel groups by: offline
 devices are kept apart from the rest, whatever their role.
@@ -53,6 +54,9 @@ class ZhaDevice:
     # When the device was last heard from, as a Unix time.
     last_seen: float | None = None
     mains_powered: bool | None = None
+    # An end device's parent: the router or coordinator it's connected to
+    # (its device registry id), as of ZHA's last topology scan.
+    parent_id: str | None = None
 
 
 def role_of(device_type: str | None, is_active_coordinator: bool = False) -> str:
@@ -78,14 +82,22 @@ def zha_network(hass: HomeAssistant) -> dict[str, ZhaDevice] | None:
     except Exception:  # noqa: BLE001 - not set up, or a ZHA without the helper
         return None
 
-    network: dict[str, ZhaDevice] = {}
+    proxies: list[tuple[str, Any]] = []
+    ids_by_ieee: dict[str, str] = {}
     for proxy in list(getattr(gateway_proxy, "device_proxies", {}).values()):
         try:
             device_id = proxy.device_id
             device = proxy.device
         except AttributeError:  # not in the device registry yet
             continue
+        proxies.append((device_id, device))
+        ids_by_ieee[str(getattr(device, "ieee", "")).lower()] = device_id
+    parents = _parents(gateway_proxy)
+
+    network: dict[str, ZhaDevice] = {}
+    for device_id, device in proxies:
         try:
+            parent_ieee = parents.get(str(getattr(device, "ieee", "")).lower())
             network[device_id] = ZhaDevice(
                 role=role_of(
                     getattr(device, "device_type", None),
@@ -96,10 +108,31 @@ def zha_network(hass: HomeAssistant) -> dict[str, ZhaDevice] | None:
                 rssi=getattr(device, "rssi", None),
                 last_seen=getattr(device, "last_seen", None),
                 mains_powered=getattr(device, "is_mains_powered", None),
+                parent_id=ids_by_ieee.get(parent_ieee) if parent_ieee else None,
             )
         except Exception:  # noqa: BLE001
             _LOGGER.debug("Couldn't read ZHA device %s", device_id, exc_info=True)
     return network
+
+
+def _parents(gateway_proxy: Any) -> dict[str, str]:
+    """Each end device's parent, by IEEE address (lower case).
+
+    ZHA scans every router's (and the coordinator's) neighbour table every
+    few hours (zigpy's topology scan, every 4 hours by default); the
+    devices a table lists as its children are connected to that router.
+    """
+    try:
+        tables = gateway_proxy.gateway.application_controller.topology.neighbors
+    except AttributeError:
+        return {}
+    parents: dict[str, str] = {}
+    for parent_ieee, neighbors in list(tables.items()):
+        for neighbor in neighbors or []:
+            relationship = getattr(neighbor, "relationship", None)
+            if getattr(relationship, "name", relationship) == "Child":
+                parents[str(neighbor.ieee).lower()] = str(parent_ieee).lower()
+    return parents
 
 
 def _ieee(device: dr.DeviceEntry) -> str | None:
@@ -158,6 +191,12 @@ def build_device_list(
         level, low, battery_entity = _battery(hass, entries)
         role = info.role if info else ROLE_UNKNOWN
         available = bool(info and info.available)
+        # Only for an online end device: where it's connected now.
+        parent = (
+            dev_reg.async_get(info.parent_id)
+            if info and info.parent_id and available and role == ROLE_END_DEVICE
+            else None
+        )
         last_seen = (
             datetime.fromtimestamp(info.last_seen, UTC).isoformat()
             if info and info.last_seen
@@ -181,6 +220,8 @@ def build_device_list(
                 "mains_powered": info.mains_powered if info else None,
                 "lqi": info.lqi if info else None,
                 "rssi": info.rssi if info else None,
+                "parent_id": parent.id if parent else None,
+                "parent_name": (parent.name_by_user or parent.name or "") if parent else None,
                 "last_seen": last_seen,
                 "disabled": device.disabled_by is not None,
             }

@@ -23,8 +23,9 @@ devices are sorted by name - click a column heading to sort by it instead.
 |---|---|
 | Device name | The name you gave the device, or ZHA's. Opens the device's page. |
 | Area | The device's area. |
-| Manufacturer, Model | As ZHA reports them. |
+| Model | As ZHA reports it. (The manufacturer isn't shown here, but the filter still finds it; the Groups page shows it.) |
 | Battery | The battery level, from the device's battery sensor, or Low/OK for devices that only report a low battery. Opens the battery's history. "—" for mains-powered devices. |
+| Connected to | For an online end device, the router or coordinator it's connected to (its parent), linking to that device's page. It comes from ZHA's network scan, which reads every router's neighbour table every 4 hours by default, so it can lag behind a device that has just moved. "—" for routers and the coordinator (they're part of the mesh rather than connected to one device), offline devices, and end devices not in any table yet. |
 | LQI | Link quality of the last message heard from the device (0-255). |
 | RSSI | Signal strength of the last message heard from the device, in dBm. |
 | Status | Online or Offline; hover for when ZHA last heard from it. |

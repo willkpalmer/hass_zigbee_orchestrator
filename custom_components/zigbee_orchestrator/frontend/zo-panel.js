@@ -30,9 +30,13 @@ const byName = byText("name");
 const COLUMNS = [
   { key: "name", label: "Device name", compare: byName, cls: "name" },
   { key: "area", label: "Area", compare: byText("area") },
-  { key: "manufacturer", label: "Manufacturer", compare: byText("manufacturer") },
+  { key: "manufacturer", label: "Manufacturer", compare: byText("manufacturer"), views: ["groups"] },
   { key: "model", label: "Model", compare: byText("model") },
   { key: "battery", label: "Battery", compare: byBattery, cls: "num" },
+  {
+    key: "parent_name", label: "Connected to", compare: byText("parent_name"), views: ["devices"],
+    title: "The router or coordinator each online end device is connected to, as of ZHA's last network scan (every few hours)",
+  },
   {
     key: "lqi", label: "LQI", compare: byNumber("lqi"), cls: "num", views: ["devices"],
     title: "Link quality of the last message heard from the device, 0-255: red below 80, amber below 150, green from 150",
@@ -49,7 +53,7 @@ const DEFAULT_SORT = { key: "name", dir: 1 };
 // What each page's filter goes by.
 function matches(d, words) {
   if (!words.length) return true;
-  const hay = text([d.name, d.area, d.manufacturer, d.model, d.ieee].join(" "));
+  const hay = text([d.name, d.area, d.manufacturer, d.model, d.ieee, d.parent_name].join(" "));
   return words.every((w) => hay.includes(w));
 }
 const wordsOf = (filter) => text(filter).split(/\s+/).filter(Boolean);
@@ -516,12 +520,12 @@ export class ZigbeeOrchestratorPanel extends HTMLElement {
     tr.append(
       name,
       cell("Area", d.area),
-      cell("Manufacturer", d.manufacturer),
-      cell("Model", d.model),
-      this._batteryCell(d),
     );
+    if (groupsPage) tr.append(cell("Manufacturer", d.manufacturer));
+    tr.append(cell("Model", d.model), this._batteryCell(d));
     if (!groupsPage) {
       tr.append(
+        this._parentCell(d),
         this._signalCell("lqi", "LQI", d.lqi, d),
         this._signalCell("rssi", "RSSI", d.rssi, d, " dBm"),
       );
@@ -580,6 +584,32 @@ export class ZigbeeOrchestratorPanel extends HTMLElement {
     } else {
       td.appendChild(span);
     }
+    return td;
+  }
+
+  // The router or coordinator an online end device is connected to.
+  _parentCell(d) {
+    const td = document.createElement("td");
+    td.className = "parent";
+    const l = document.createElement("span");
+    l.className = "label sub";
+    l.textContent = "Connected to: ";
+    if (d.parent_id) {
+      const a = document.createElement("a");
+      a.href = `/config/devices/device/${encodeURIComponent(d.parent_id)}`;
+      a.dataset.nav = "";
+      a.textContent = d.parent_name || "Unnamed device";
+      a.title = "Open its page. As of ZHA's last network scan (every few hours).";
+      td.append(l, a);
+      return td;
+    }
+    const span = document.createElement("span");
+    span.className = "muted";
+    span.textContent = "—";
+    span.title = !d.available ? "Offline"
+      : d.role === "end_device" ? "Not known yet: ZHA scans the network every few hours"
+        : "Routers and the coordinator are part of the mesh rather than connected to one device";
+    td.append(l, span);
     return td;
   }
 
