@@ -1,6 +1,8 @@
 """The device list (devices.py) and its WebSocket feed (websocket_api.py)."""
 from __future__ import annotations
 
+import pytest
+
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers import area_registry as ar
 from homeassistant.helpers import device_registry as dr
@@ -229,3 +231,74 @@ async def test_subscription_sends_changes(hass, monkeypatch):
     dr.async_get(hass).async_update_device(device.id, name_by_user="Lamp")
     await settle()
     assert len(sent) == 2
+
+
+async def test_topology_scan(hass, monkeypatch):
+    import asyncio
+    import sys
+    import types
+
+    from custom_components.zigbee_orchestrator import websocket_api as ws
+    from custom_components.zigbee_orchestrator.devices import ZhaNotRunning, async_scan_topology
+
+    # ZHA not running.
+    with pytest.raises(ZhaNotRunning):
+        await async_scan_topology(hass)
+
+    scans = []
+    release = asyncio.Event()
+
+    async def scan():
+        scans.append(1)
+        await release.wait()
+
+    topology = types.SimpleNamespace(scan=scan, neighbors={})
+    gateway = types.SimpleNamespace(application_controller=types.SimpleNamespace(topology=topology))
+    helpers = types.ModuleType("homeassistant.components.zha.helpers")
+    helpers.get_zha_gateway_proxy = lambda _hass: types.SimpleNamespace(device_proxies={}, gateway=gateway)
+    monkeypatch.setitem(sys.modules, "homeassistant.components.zha.helpers", helpers)
+    hass.config.components.add("zha")
+
+    # Two at once (two browser tabs): one scan, both wait for it.
+    first = hass.async_create_task(async_scan_topology(hass))
+    second = hass.async_create_task(async_scan_topology(hass))
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    assert not first.done() and not second.done()
+    release.set()
+    await first
+    await second
+    assert scans == [1]
+
+    # The command answers when the scan is done, and the device list is
+    # sent again straight away.
+    zha = _entry(hass)
+    _device(hass, zha, "00:00:00:00:00:00:00:09", "Lamp")
+    sent, results, errors = [], [], []
+    connection = types.SimpleNamespace(
+        user=types.SimpleNamespace(is_admin=True),
+        subscriptions={},
+        send_result=lambda _id, result=None: results.append(_id),
+        send_error=lambda _id, code, message: errors.append(code),
+        send_message=sent.append,
+    )
+    ws.websocket_devices_subscribe(hass, connection, {"id": 1, "type": ws.WS_DEVICES_SUBSCRIBE})
+    assert len(sent) == 1
+    dr.async_get(hass).async_update_device(
+        next(iter(dr.async_get(hass).devices.values())).id, name_by_user="Desk lamp"
+    )
+    ws.websocket_topology_scan(hass, connection, {"id": 2, "type": ws.WS_TOPOLOGY_SCAN})
+    await hass.async_block_till_done()
+    assert 2 in results and not errors
+    assert len(scans) == 2
+    assert sent[-1]["event"]["devices"][0]["name"] == "Desk lamp"
+    connection.subscriptions[1]()
+
+    # A failing scan is an error, not a crash.
+    async def broken():
+        raise RuntimeError("radio busy")
+
+    topology.scan = broken
+    ws.websocket_topology_scan(hass, connection, {"id": 3, "type": ws.WS_TOPOLOGY_SCAN})
+    await hass.async_block_till_done()
+    assert errors == ["scan_failed"]

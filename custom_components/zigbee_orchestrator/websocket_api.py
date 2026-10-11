@@ -13,6 +13,10 @@ Groups page (see groups.py), {"groups": [...]}, straight away and after
 every change. zigbee_orchestrator/groups/create, rename, delete,
 set_devices, add_devices and remove_devices change them.
 
+zigbee_orchestrator/topology/scan has ZHA re-read which router each end
+device is connected to now (see devices.async_scan_topology), answers
+when that's done, and sends every device list subscription the new list.
+
 Admin-only, like the panel itself.
 """
 from __future__ import annotations
@@ -28,13 +32,17 @@ from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.helpers import area_registry as ar
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers.dispatcher import async_dispatcher_connect, async_dispatcher_send
 from homeassistant.helpers.event import async_call_later, async_track_time_interval
 
 from .const import DATA_GROUPS
-from .devices import build_device_list, zha_network
+from .devices import ZhaNotRunning, async_scan_topology, build_device_list, zha_network
 from .groups import GroupError, GroupStore
 
 WS_DEVICES_SUBSCRIBE = "zigbee_orchestrator/devices/subscribe"
+WS_TOPOLOGY_SCAN = "zigbee_orchestrator/topology/scan"
+# Sent when the device list should be sent again now (after a scan).
+SIGNAL_DEVICES_CHANGED = "zigbee_orchestrator_devices_changed"
 WS_GROUPS_SUBSCRIBE = "zigbee_orchestrator/groups/subscribe"
 WS_GROUPS_CREATE = "zigbee_orchestrator/groups/create"
 WS_GROUPS_RENAME = "zigbee_orchestrator/groups/rename"
@@ -53,6 +61,7 @@ _REFRESH_INTERVAL = timedelta(minutes=1)
 @callback
 def async_setup(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, websocket_devices_subscribe)
+    websocket_api.async_register_command(hass, websocket_topology_scan)
     websocket_api.async_register_command(hass, websocket_groups_subscribe)
     websocket_api.async_register_command(hass, websocket_groups_create)
     websocket_api.async_register_command(hass, websocket_groups_rename)
@@ -108,6 +117,7 @@ def websocket_devices_subscribe(
         hass.bus.async_listen(er.EVENT_ENTITY_REGISTRY_UPDATED, _changed),
         hass.bus.async_listen(ar.EVENT_AREA_REGISTRY_UPDATED, _changed),
         async_track_time_interval(hass, _send, _REFRESH_INTERVAL),
+        async_dispatcher_connect(hass, SIGNAL_DEVICES_CHANGED, _send),
     ]
 
     @callback
@@ -120,6 +130,24 @@ def websocket_devices_subscribe(
     connection.subscriptions[msg["id"]] = _unsubscribe
     connection.send_result(msg["id"])
     connection.send_message(websocket_api.event_message(msg["id"], payload))
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command({vol.Required("type"): WS_TOPOLOGY_SCAN})
+@websocket_api.async_response
+async def websocket_topology_scan(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    try:
+        await async_scan_topology(hass)
+    except ZhaNotRunning:
+        connection.send_error(msg["id"], "zha_not_running", "ZHA isn't running")
+        return
+    except Exception as err:  # noqa: BLE001 - the scan itself failed
+        connection.send_error(msg["id"], "scan_failed", f"The network scan failed: {err}")
+        return
+    async_dispatcher_send(hass, SIGNAL_DEVICES_CHANGED)
+    connection.send_result(msg["id"])
 
 
 def _groups(

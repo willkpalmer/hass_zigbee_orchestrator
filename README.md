@@ -30,6 +30,20 @@ devices are sorted by name - click a column heading to sort by it instead.
 | RSSI | Signal strength of the last message heard from the device, in dBm. |
 | Status | Online or Offline; hover for when ZHA last heard from it. |
 
+**Refresh connections** (on the Devices page) has ZHA re-read every
+router's neighbour table now - the same scan as the refresh button on
+ZHA's own network map - rather than waiting for its next scheduled scan.
+It takes from a few seconds to a few minutes depending on how many
+routers there are, and the Connected to column updates as soon as it's
+done. To have ZHA scan more often by itself, set `topology_scan_period`
+(in minutes) in `configuration.yaml` and restart:
+
+```yaml
+zha:
+  zigpy_config:
+    topology_scan_period: 60
+```
+
 Battery, LQI and RSSI readings are coloured by strength:
 
 | | Red (low) | Amber (medium) | Green (high) |

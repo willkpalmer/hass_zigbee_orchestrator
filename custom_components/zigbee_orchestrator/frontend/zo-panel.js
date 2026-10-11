@@ -77,6 +77,9 @@ export class ZigbeeOrchestratorPanel extends HTMLElement {
     this._edit = null;
     // The group whose devices are being chosen, and the ticked devices.
     this._picking = null;
+    // Refresh connections: while ZHA's network scan runs, and how it went.
+    this._scanning = false;
+    this._scanResult = null;
     // The Ungrouped devices ticked on the Groups page, to add to a group.
     this._selected = new Set();
     // Each page's search, sort and collapsed groups, as left last time.
@@ -299,6 +302,7 @@ export class ZigbeeOrchestratorPanel extends HTMLElement {
     groupCount.title = `${this._groups.length} groups`;
     this._renderSummary(offline);
     this._el("notice").hidden = !this._loaded || this._zhaRunning;
+    this._renderScan();
     this._el("hint").hidden = !isGroups;
     for (const el of this.shadowRoot.querySelectorAll("[data-only-view]")) {
       el.hidden = !el.dataset.onlyView.split(" ").includes(this._view);
@@ -648,6 +652,38 @@ export class ZigbeeOrchestratorPanel extends HTMLElement {
     return td;
   }
 
+  // -- Refresh connections ----------------------------------------------
+
+  _renderScan() {
+    const btn = this._el("scan");
+    btn.disabled = this._scanning || !this._zhaRunning;
+    btn.textContent = this._scanning ? "Scanning the network…" : "Refresh connections";
+    const status = this._el("scan-status");
+    const result = this._scanResult;
+    status.classList.toggle("error", !!result?.error);
+    status.textContent = this._scanning ? "This can take a few minutes"
+      : result?.error ? `Couldn't refresh: ${result.error}`
+        : result ? `Connections refreshed at ${result.at.toLocaleTimeString()}` : "";
+  }
+
+  // Has ZHA re-read every router's neighbour table now; the device list
+  // comes back with the new connections as soon as it's done.
+  async _scan() {
+    if (this._scanning) return;
+    this._scanning = true;
+    this._scanResult = null;
+    this._renderScan();
+    try {
+      await this._call({ type: WS.TOPOLOGY_SCAN });
+      this._scanResult = { at: new Date() };
+    } catch (err) {
+      this._scanResult = { error: err?.message || String(err) };
+    } finally {
+      this._scanning = false;
+      this._renderScan();
+    }
+  }
+
   // -- the Groups page's selected Ungrouped devices ----------------------
 
   // Only devices shown under Ungrouped stay selected (not those put in a
@@ -887,6 +923,9 @@ export class ZigbeeOrchestratorPanel extends HTMLElement {
           return;
         case "toggle-groups":
           this._toggleAll();
+          return;
+        case "scan":
+          this._scan();
           return;
         case "new-group":
           this._openEdit("create");

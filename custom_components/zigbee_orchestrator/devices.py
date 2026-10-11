@@ -14,6 +14,7 @@ devices are kept apart from the rest, whatever their role.
 """
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from datetime import UTC, datetime
 import logging
@@ -30,6 +31,9 @@ from .const import ROLE_COORDINATOR, ROLE_END_DEVICE, ROLE_ROUTER, ROLE_UNKNOWN,
 _LOGGER = logging.getLogger(__name__)
 
 CATEGORY_OFFLINE = "offline"
+
+# The topology scan started from the panel, while it runs.
+_DATA_SCAN = "zigbee_orchestrator_topology_scan"
 
 # ZHA's logical device types (zigpy's LogicalType names).
 _ROLES = {
@@ -113,6 +117,34 @@ def zha_network(hass: HomeAssistant) -> dict[str, ZhaDevice] | None:
         except Exception:  # noqa: BLE001
             _LOGGER.debug("Couldn't read ZHA device %s", device_id, exc_info=True)
     return network
+
+
+class ZhaNotRunning(Exception):
+    """ZHA isn't set up, so there's no network to scan."""
+
+
+async def async_scan_topology(hass: HomeAssistant) -> None:
+    """Has ZHA read every router's neighbour table now, rather than at its
+    next scheduled scan (see _parents), and waits until it's done.
+
+    The same scan as the refresh button on ZHA's own network map
+    (zha/topology/update). zigpy cancels a scan when another starts, so a
+    scan already started here is waited for rather than started again.
+    """
+    if ZHA_DOMAIN not in hass.config.components:
+        raise ZhaNotRunning
+    try:
+        from homeassistant.components.zha.helpers import get_zha_gateway_proxy
+
+        topology = get_zha_gateway_proxy(hass).gateway.application_controller.topology
+    except Exception as err:  # noqa: BLE001 - not set up, or a ZHA without it
+        raise ZhaNotRunning from err
+
+    task: asyncio.Task | None = hass.data.get(_DATA_SCAN)
+    if task is None or task.done():
+        task = hass.async_create_background_task(topology.scan(), "zigbee_orchestrator topology scan")
+        hass.data[_DATA_SCAN] = task
+    await asyncio.shield(task)
 
 
 def _parents(gateway_proxy: Any) -> dict[str, str]:

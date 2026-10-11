@@ -3,6 +3,7 @@
 
 export const WS = {
   DEVICES_SUBSCRIBE: "zigbee_orchestrator/devices/subscribe",
+  TOPOLOGY_SCAN: "zigbee_orchestrator/topology/scan",
   GROUPS_SUBSCRIBE: "zigbee_orchestrator/groups/subscribe",
   GROUPS_CREATE: "zigbee_orchestrator/groups/create",
   GROUPS_RENAME: "zigbee_orchestrator/groups/rename",

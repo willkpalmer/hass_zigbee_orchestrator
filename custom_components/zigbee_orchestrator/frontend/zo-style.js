@@ -70,6 +70,7 @@ export const STYLE = `
   flex: 1 1 220px; min-width: 160px;
 }
 .spacer { flex: 1 1 auto; }
+.scan-status.error { color: var(--error-color, #db4437); }
 .action {
   font: inherit; font-weight: 500; padding: 8px 14px; border-radius: 6px; cursor: pointer;
   border: 1px solid var(--primary-color, #03a9f4); background: var(--primary-color, #03a9f4);
@@ -258,6 +259,9 @@ export const TEMPLATE = `
     <div class="toolbar">
       <input type="search" data-el="filter" aria-label="Filter" placeholder="Filter by name, area, manufacturer or model" title="Filter (press / to jump here)">
       <span class="spacer"></span>
+      <span class="scan-status sub" data-el="scan-status" data-only-view="devices" role="status" aria-live="polite"></span>
+      <button class="action secondary" data-action="scan" data-el="scan" data-only-view="devices"
+        title="Have ZHA re-read which router or coordinator each end device is connected to now, rather than at its next scan (every 4 hours by default). Takes from a few seconds to a few minutes.">Refresh connections</button>
       <button class="action secondary" data-action="toggle-groups" title="Collapse or expand every group">Collapse all</button>
       <button class="action" data-action="new-group" data-only-view="groups" title="Make a group of devices, to find them easily">New group</button>
     </div>
