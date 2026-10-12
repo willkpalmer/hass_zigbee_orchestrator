@@ -27,6 +27,9 @@
 //             The devices in no group are listed last, under Ungrouped,
 //             where they can be selected and added to a group or made
 //             into a new one.
+//   #batteries  Batteries - every device with a battery, grouped Green,
+//             Amber, Red (as the Battery column's colours) and No reading;
+//             Red starts expanded, the others collapsed.
 //
 // The device list and the groups are each subscribed to once over the
 // WebSocket (zigbee_orchestrator/devices/subscribe, .../groups/subscribe)

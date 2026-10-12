@@ -12,7 +12,16 @@ const {
 } = await import(`./zo-util.js${V}`);
 const { STYLE, TEMPLATE } = await import(`./zo-style.js${V}`);
 
-const VIEWS = ["devices", "groups"];
+const VIEWS = ["devices", "groups", "batteries"];
+// The Batteries page's sections, in this order, and which start collapsed
+// (until you open or close one yourself).
+const BATTERY_SECTIONS = [
+  ["high", "Green", "over 50%"],
+  ["medium", "Amber", "21-50%"],
+  ["low", "Red", "20% or less, or the device says it's low"],
+  ["none", "No reading", "has a battery, but no reading yet"],
+];
+const DEFAULT_COLLAPSED = { batteries: ["high", "medium", "none"] };
 // The Groups page's last heading: the devices in no group.
 const UNGROUPED = "__ungrouped__";
 const CATEGORY_LABELS = Object.fromEntries(CATEGORIES);
@@ -26,22 +35,22 @@ const byStatus = (a, b) => Number(b.available) - Number(a.available);
 const byName = byText("name");
 
 // Every column: key, heading, how it sorts, cell class, tooltip, and the
-// pages it's on (both, if none).
+// pages it's on (every page, if none).
 const COLUMNS = [
   { key: "name", label: "Device name", compare: byName, cls: "name" },
   { key: "area", label: "Area", compare: byText("area") },
   { key: "model", label: "Model", compare: byText("model") },
   { key: "battery", label: "Battery", compare: byBattery, cls: "num" },
   {
-    key: "parent_name", label: "Connected to", compare: byText("parent_name"),
+    key: "parent_name", label: "Connected to", compare: byText("parent_name"), views: ["devices", "groups"],
     title: "The router or coordinator each online end device is connected to, as of ZHA's last network scan (every few hours)",
   },
   {
-    key: "lqi", label: "LQI", compare: byNumber("lqi"), cls: "num",
+    key: "lqi", label: "LQI", compare: byNumber("lqi"), cls: "num", views: ["devices", "groups"],
     title: "Link quality of the last message heard from the device, 0-255: red below 80, amber below 150, green from 150",
   },
   {
-    key: "rssi", label: "RSSI", compare: byNumber("rssi"), cls: "num",
+    key: "rssi", label: "RSSI", compare: byNumber("rssi"), cls: "num", views: ["devices", "groups"],
     title: "Signal strength of the last message heard from the device, in dBm: red below -80, amber below -65, green from -65",
   },
   { key: "available", label: "Status", compare: byStatus },
@@ -54,6 +63,15 @@ function matches(d, words) {
   if (!words.length) return true;
   const hay = text([d.name, d.area, d.manufacturer, d.model, d.ieee, d.parent_name].join(" "));
   return words.every((w) => hay.includes(w));
+}
+// A device's battery as "high", "medium" or "low" (green, amber, red), or
+// "none" when it has a battery with no reading; "" with no battery. A
+// device saying its battery is low is red, whatever the level.
+function batteryRag(d) {
+  if (d.battery_low === true) return "low";
+  if (d.battery !== null && d.battery !== undefined) return level("battery", d.battery);
+  if (d.battery_low === false) return "high";
+  return d.battery_entity ? "none" : "";
 }
 const wordsOf = (filter) => text(filter).split(/\s+/).filter(Boolean);
 
@@ -92,7 +110,7 @@ export class ZigbeeOrchestratorPanel extends HTMLElement {
         sort: COLUMNS.some((c) => c.key === was.sort?.key)
           ? { key: was.sort.key, dir: was.sort.dir === -1 ? -1 : 1 }
           : { ...DEFAULT_SORT },
-        collapsed: new Set(Array.isArray(collapsed[view]) ? collapsed[view] : []),
+        collapsed: new Set(Array.isArray(collapsed[view]) ? collapsed[view] : DEFAULT_COLLAPSED[view] || []),
       };
     }
 
@@ -259,6 +277,16 @@ export class ZigbeeOrchestratorPanel extends HTMLElement {
   // Ungrouped - the devices in no group - when there are any.
   _sections() {
     const words = wordsOf(this._st().filter);
+    if (this._view === "batteries") {
+      // Every device with a battery, by its battery's red/amber/green.
+      const shown = this._devices.filter((d) => batteryRag(d) && matches(d, words));
+      return BATTERY_SECTIONS
+        .map(([key, label, title]) => ({
+          key, label, title, cls: `rag rag-${key}`,
+          rows: this._sorted(shown.filter((d) => batteryRag(d) === key)),
+        }))
+        .filter((s) => s.rows.length);
+    }
     if (this._view === "devices") {
       const shown = this._devices.filter((d) => matches(d, words));
       return CATEGORIES
@@ -288,6 +316,7 @@ export class ZigbeeOrchestratorPanel extends HTMLElement {
   _render() {
     this._rendered = true;
     const isGroups = this._view === "groups";
+    const isBatteries = this._view === "batteries";
     for (const btn of this.shadowRoot.querySelectorAll(".view")) {
       btn.classList.toggle("active", btn.dataset.view === this._view);
     }
@@ -300,6 +329,12 @@ export class ZigbeeOrchestratorPanel extends HTMLElement {
     const groupCount = this.shadowRoot.querySelector('[data-count="groups"]');
     groupCount.textContent = this._groups.length ? num(this._groups.length) : "";
     groupCount.title = `${this._groups.length} groups`;
+    // Red batteries, on the Batteries button.
+    const red = this._devices.filter((d) => batteryRag(d) === "low").length;
+    const redCount = this.shadowRoot.querySelector('[data-count="batteries"]');
+    redCount.textContent = red ? num(red) : "";
+    redCount.classList.toggle("alert", red > 0);
+    redCount.title = `${red} red`;
     this._renderSummary(offline);
     this._el("notice").hidden = !this._loaded || this._zhaRunning;
     this._renderScan();
@@ -342,6 +377,7 @@ export class ZigbeeOrchestratorPanel extends HTMLElement {
     else if (!this._loaded || (isGroups && !this._groupsLoaded)) status.textContent = "Loading…";
     else if (isGroups && !this._groups.length) status.textContent = "No groups yet. Make one with New group, then choose its devices.";
     else if (!isGroups && !this._devices.length) status.textContent = "No Zigbee devices found. Is the ZHA integration set up?";
+    else if (isBatteries && !sections.length && !filtering) status.textContent = "No devices with a battery found.";
     else if (!sections.length && filtering) status.textContent = isGroups ? "No device in any group matches the filter." : "No devices match the filter.";
     else status.hidden = true;
 
@@ -356,6 +392,10 @@ export class ZigbeeOrchestratorPanel extends HTMLElement {
     else if (isGroups) {
       const inGroups = new Set(this._groups.flatMap((g) => g.device_ids)).size;
       footer.textContent = `${num(this._groups.length)} groups · ${num(inGroups)} of ${num(this._devices.length)} devices in at least one group`;
+    } else if (isBatteries) {
+      const all = this._devices.filter(batteryRag).length;
+      const shown = sections.reduce((n, s) => n + s.rows.length, 0);
+      footer.textContent = `${shown === all ? num(all) : `${num(shown)} of ${num(all)}`} devices with a battery · updated ${this._updated.toLocaleTimeString()}`;
     } else {
       const shown = sections.reduce((n, s) => n + s.rows.length, 0);
       const devices = shown === this._devices.length
@@ -397,7 +437,9 @@ export class ZigbeeOrchestratorPanel extends HTMLElement {
       th.appendChild(arrow);
       head.appendChild(th);
     }
-    // The last column: Remove from group, or Maintenance / Return.
+    // The last column: Remove from group, or Maintenance / Return (none
+    // on the Batteries page).
+    if (!this._hasActions()) return;
     const th = document.createElement("th");
     th.className = "remove";
     th.setAttribute("aria-label", this._view === "groups" ? "Remove from group" : "Maintenance");
@@ -412,7 +454,7 @@ export class ZigbeeOrchestratorPanel extends HTMLElement {
     tr.setAttribute("aria-expanded", String(!collapsed));
     tr.title = collapsed ? "Show these devices (Enter)" : "Hide these devices (Enter)";
     const td = document.createElement("td");
-    td.colSpan = columnsOf(this._view).length + 1;
+    td.colSpan = columnsOf(this._view).length + (this._hasActions() ? 1 : 0);
     const caret = document.createElement("span");
     caret.className = "caret";
     caret.textContent = collapsed ? "▸" : "▾";
@@ -437,7 +479,13 @@ export class ZigbeeOrchestratorPanel extends HTMLElement {
     } else {
       td.append(caret);
     }
-    td.append(section.group || section.ungrouped ? section.label : CATEGORY_LABELS[section.key], count);
+    td.append(section.group || section.ungrouped || section.title ? section.label : CATEGORY_LABELS[section.key], count);
+    if (section.title) {
+      const sub = document.createElement("span");
+      sub.className = "group-sub";
+      sub.textContent = ` · ${section.title}`;
+      td.appendChild(sub);
+    }
     // Every offline device to Maintenance, or every one back.
     const bulk = this._view === "devices" && {
       offline: ["maintenance-all", "Move all to Maintenance", "These are all offline on purpose: list them under Maintenance and stop counting them as offline"],
@@ -532,18 +580,18 @@ export class ZigbeeOrchestratorPanel extends HTMLElement {
       return td;
     };
 
-    tr.append(
-      name,
-      cell("Area", d.area),
-    );
-    tr.append(
-      cell("Model", d.model),
-      this._batteryCell(d),
-      this._parentCell(d),
-      this._signalCell("lqi", "LQI", d.lqi, d),
-      this._signalCell("rssi", "RSSI", d.rssi, d, " dBm"),
-      this._statusCell(d),
-    );
+    const cells = {
+      name: () => name,
+      area: () => cell("Area", d.area),
+      model: () => cell("Model", d.model),
+      battery: () => this._batteryCell(d),
+      parent_name: () => this._parentCell(d),
+      lqi: () => this._signalCell("lqi", "LQI", d.lqi, d),
+      rssi: () => this._signalCell("rssi", "RSSI", d.rssi, d, " dBm"),
+      available: () => this._statusCell(d),
+    };
+    tr.append(...columnsOf(this._view).map((col) => cells[col.key]()));
+    if (!this._hasActions()) return tr;
     if (group) {
       const td = document.createElement("td");
       td.className = "remove";
@@ -577,6 +625,9 @@ export class ZigbeeOrchestratorPanel extends HTMLElement {
     }
     return tr;
   }
+
+  // Whether the current page's rows have a last column of buttons.
+  _hasActions() { return this._view !== "batteries"; }
 
   async _setMaintenance(ids, maintenance) {
     if (!ids.length) return;

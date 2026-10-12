@@ -118,6 +118,11 @@ a:hover { text-decoration: underline; }
 .chip.offline { background: rgba(219, 68, 55, 0.15); color: var(--error-color, #db4437); }
 .chip.maintenance { background: rgba(3, 169, 244, 0.15); color: var(--primary-color, #03a9f4); }
 tbody tr.group.maintenance td { color: #5acd7b; }
+/* The Batteries page's sections: green, amber, red, no reading. */
+tbody tr.group.rag-high td { color: var(--success-color, #43a047); }
+tbody tr.group.rag-medium td { color: var(--warning-color, #e68a00); }
+tbody tr.group.rag-low td { color: var(--error-color, #db4437); }
+tbody tr.group .group-sub { font-weight: 400; font-size: 12px; color: var(--secondary-text-color, #727272); }
 .row-btn {
   font: inherit; font-size: 12px; font-weight: 500; white-space: nowrap; cursor: pointer;
   padding: 2px 8px; border-radius: 10px; border: 1px solid var(--divider-color, #ccc);
@@ -259,6 +264,7 @@ export const TEMPLATE = `
   <nav class="views" aria-label="Pages">
     <button class="view" data-view="devices">Devices<span class="count" data-count="devices"></span></button>
     <button class="view" data-view="groups">Groups<span class="count" data-count="groups"></span></button>
+    <button class="view" data-view="batteries">Batteries<span class="count" data-count="batteries"></span></button>
   </nav>
   <div class="card" data-el="devices-card">
     <div class="notice" data-el="notice" hidden>

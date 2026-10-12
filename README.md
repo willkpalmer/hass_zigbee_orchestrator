@@ -108,6 +108,21 @@ narrows every group to the devices that match. Groups are kept in Home
 Assistant's storage (`.storage/zigbee_orchestrator.groups`), and a device
 removed from Home Assistant leaves its groups by itself.
 
+## Batteries
+
+Every device with a battery, grouped by how full it is (the same
+thresholds as the Battery column's colours):
+
+- **Green** - over 50% (and devices that only report their battery is OK)
+- **Amber** - 21-50%
+- **Red** - 20% or less, or the device says its battery is low
+- **No reading** - devices with a battery sensor that hasn't reported yet
+
+Green, Amber and No reading start collapsed and Red expanded, so the
+batteries to change are what you see first; open or close any of them and
+that's remembered. The columns are Device name, Area, Model, Battery and
+Status, and the Batteries button shows how many are red.
+
 ## Installation
 
 ### HACS
