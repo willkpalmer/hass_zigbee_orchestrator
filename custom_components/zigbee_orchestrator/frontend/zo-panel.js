@@ -291,7 +291,8 @@ export class ZigbeeOrchestratorPanel extends HTMLElement {
     for (const btn of this.shadowRoot.querySelectorAll(".view")) {
       btn.classList.toggle("active", btn.dataset.view === this._view);
     }
-    const offline = this._devices.filter((d) => !d.available).length;
+    // Devices in maintenance are offline on purpose: not counted.
+    const offline = this._devices.filter((d) => !d.available && !d.maintenance).length;
     const count = this.shadowRoot.querySelector('[data-count="devices"]');
     count.textContent = this._loaded && offline ? num(offline) : "";
     count.classList.toggle("alert", offline > 0);
@@ -396,12 +397,11 @@ export class ZigbeeOrchestratorPanel extends HTMLElement {
       th.appendChild(arrow);
       head.appendChild(th);
     }
-    if (this._view === "groups") {
-      const th = document.createElement("th");
-      th.className = "remove";
-      th.setAttribute("aria-label", "Remove from group");
-      head.appendChild(th);
-    }
+    // The last column: Remove from group, or Maintenance / Return.
+    const th = document.createElement("th");
+    th.className = "remove";
+    th.setAttribute("aria-label", this._view === "groups" ? "Remove from group" : "Maintenance");
+    head.appendChild(th);
   }
 
   _groupRow(section, collapsed) {
@@ -412,7 +412,7 @@ export class ZigbeeOrchestratorPanel extends HTMLElement {
     tr.setAttribute("aria-expanded", String(!collapsed));
     tr.title = collapsed ? "Show these devices (Enter)" : "Hide these devices (Enter)";
     const td = document.createElement("td");
-    td.colSpan = columnsOf(this._view).length + (this._view === "groups" ? 1 : 0);
+    td.colSpan = columnsOf(this._view).length + 1;
     const caret = document.createElement("span");
     caret.className = "caret";
     caret.textContent = collapsed ? "▸" : "▾";
@@ -438,6 +438,18 @@ export class ZigbeeOrchestratorPanel extends HTMLElement {
       td.append(caret);
     }
     td.append(section.group || section.ungrouped ? section.label : CATEGORY_LABELS[section.key], count);
+    // Every offline device to Maintenance, or every one back.
+    const bulk = this._view === "devices" && {
+      offline: ["maintenance-all", "Move all to Maintenance", "These are all offline on purpose: list them under Maintenance and stop counting them as offline"],
+      maintenance: ["return-all", "Return all", "Take every device out of maintenance: list them with the others again"],
+    }[section.key];
+    if (bulk) {
+      const btn = document.createElement("button");
+      btn.className = "group-link";
+      [btn.dataset.action, btn.textContent, btn.title] = bulk;
+      btn.dataset.devices = section.rows.map((d) => d.id).join(" ");
+      td.appendChild(btn);
+    }
     if (section.group) {
       for (const [action, label, title] of [
         ["choose-devices", "Choose devices", "Add devices to this group, or take them out"],
@@ -545,12 +557,35 @@ export class ZigbeeOrchestratorPanel extends HTMLElement {
       btn.setAttribute("aria-label", btn.title);
       td.appendChild(btn);
       tr.appendChild(td);
-    } else if (groupsPage) {
+    } else {
       const td = document.createElement("td");
       td.className = "remove";
+      // On the Devices page: an offline device can be put in maintenance,
+      // one in maintenance returned.
+      if (!groupsPage && (d.maintenance || !d.available)) {
+        const btn = document.createElement("button");
+        btn.className = "row-btn";
+        btn.dataset.action = d.maintenance ? "return" : "to-maintenance";
+        btn.dataset.device = d.id;
+        btn.textContent = d.maintenance ? "Return" : "Maintenance";
+        btn.title = d.maintenance
+          ? `Take ${d.name} out of maintenance: list it with the others again`
+          : `${d.name} is offline on purpose: list it under Maintenance and stop counting it as offline`;
+        td.appendChild(btn);
+      }
       tr.appendChild(td);
     }
     return tr;
+  }
+
+  async _setMaintenance(ids, maintenance) {
+    if (!ids.length) return;
+    try {
+      await this._call({ type: WS.MAINTENANCE_SET, device_ids: ids, maintenance });
+    } catch (err) {
+      this._error = err?.message || String(err);
+      this._render();
+    }
   }
 
   _batteryCell(d) {
@@ -642,9 +677,16 @@ export class ZigbeeOrchestratorPanel extends HTMLElement {
   _statusCell(d) {
     const td = document.createElement("td");
     const chip = document.createElement("span");
-    chip.className = `chip ${d.available ? "online" : "offline"}`;
-    chip.textContent = d.available ? "Online" : "Offline";
-    if (d.last_seen) chip.title = `Last seen ${new Date(d.last_seen).toLocaleString()}`;
+    const seen = d.last_seen ? `Last seen ${new Date(d.last_seen).toLocaleString()}` : "";
+    if (d.maintenance) {
+      chip.className = "chip maintenance";
+      chip.textContent = "Maintenance";
+      chip.title = `${d.available ? "In maintenance, and online again" : "In maintenance (offline on purpose)"}${seen ? `. ${seen}` : ""}`;
+    } else {
+      chip.className = `chip ${d.available ? "online" : "offline"}`;
+      chip.textContent = d.available ? "Online" : "Offline";
+      if (seen) chip.title = seen;
+    }
     td.appendChild(chip);
     return td;
   }
@@ -923,6 +965,14 @@ export class ZigbeeOrchestratorPanel extends HTMLElement {
           return;
         case "scan":
           this._scan();
+          return;
+        case "to-maintenance":
+        case "return":
+          this._setMaintenance([actionEl.dataset.device], actionEl.dataset.action === "to-maintenance");
+          return;
+        case "maintenance-all":
+        case "return-all":
+          this._setMaintenance(actionEl.dataset.devices.split(" ").filter(Boolean), actionEl.dataset.action === "maintenance-all");
           return;
         case "new-group":
           this._openEdit("create");

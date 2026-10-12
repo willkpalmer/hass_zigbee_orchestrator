@@ -13,6 +13,10 @@ Groups page (see groups.py), {"groups": [...]}, straight away and after
 every change. zigbee_orchestrator/groups/create, rename, delete,
 set_devices, add_devices and remove_devices change them.
 
+zigbee_orchestrator/maintenance/set puts devices in maintenance (see
+maintenance.py), or takes them out of it; the device list is sent again
+straight away.
+
 zigbee_orchestrator/topology/scan has ZHA re-read which router each end
 device is connected to now (see devices.async_scan_topology), answers
 when that's done, and sends every device list subscription the new list.
@@ -35,12 +39,13 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.dispatcher import async_dispatcher_connect, async_dispatcher_send
 from homeassistant.helpers.event import async_call_later, async_track_time_interval
 
-from .const import DATA_GROUPS
+from .const import DATA_GROUPS, DATA_MAINTENANCE
 from .devices import ZhaNotRunning, async_scan_topology, build_device_list, zha_network
 from .groups import GroupError, GroupStore
 
 WS_DEVICES_SUBSCRIBE = "zigbee_orchestrator/devices/subscribe"
 WS_TOPOLOGY_SCAN = "zigbee_orchestrator/topology/scan"
+WS_MAINTENANCE_SET = "zigbee_orchestrator/maintenance/set"
 # Sent when the device list should be sent again now (after a scan).
 SIGNAL_DEVICES_CHANGED = "zigbee_orchestrator_devices_changed"
 WS_GROUPS_SUBSCRIBE = "zigbee_orchestrator/groups/subscribe"
@@ -62,6 +67,7 @@ _REFRESH_INTERVAL = timedelta(minutes=1)
 def async_setup(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, websocket_devices_subscribe)
     websocket_api.async_register_command(hass, websocket_topology_scan)
+    websocket_api.async_register_command(hass, websocket_maintenance_set)
     websocket_api.async_register_command(hass, websocket_groups_subscribe)
     websocket_api.async_register_command(hass, websocket_groups_create)
     websocket_api.async_register_command(hass, websocket_groups_rename)
@@ -74,7 +80,11 @@ def async_setup(hass: HomeAssistant) -> None:
 @callback
 def device_payload(hass: HomeAssistant) -> dict[str, Any]:
     network = zha_network(hass)
-    return {"devices": build_device_list(hass, network), "zha_running": network is not None}
+    maintenance = hass.data.get(DATA_MAINTENANCE)
+    return {
+        "devices": build_device_list(hass, network, maintenance.device_ids if maintenance else None),
+        "zha_running": network is not None,
+    }
 
 
 @websocket_api.require_admin
@@ -146,6 +156,26 @@ async def websocket_topology_scan(
     except Exception as err:  # noqa: BLE001 - the scan itself failed
         connection.send_error(msg["id"], "scan_failed", f"The network scan failed: {err}")
         return
+    async_dispatcher_send(hass, SIGNAL_DEVICES_CHANGED)
+    connection.send_result(msg["id"])
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): WS_MAINTENANCE_SET,
+        vol.Required("device_ids"): _DEVICE_IDS,
+        vol.Required("maintenance"): bool,
+    }
+)
+@callback
+def websocket_maintenance_set(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    if (store := hass.data.get(DATA_MAINTENANCE)) is None:
+        connection.send_error(msg["id"], "not_loaded", "WP Zigbee Orchestrator isn't loaded")
+        return
+    store.async_set(msg["device_ids"], msg["maintenance"])
     async_dispatcher_send(hass, SIGNAL_DEVICES_CHANGED)
     connection.send_result(msg["id"])
 

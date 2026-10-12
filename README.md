@@ -14,6 +14,8 @@ Every Zigbee device ZHA knows about, grouped by its role on the network:
 - **End devices** - mostly battery-powered sensors, buttons and remotes
 - **Offline** - every device ZHA currently considers unavailable, whatever
   its role
+- **Maintenance** - devices you've marked as deliberately offline
+  (unplugged, batteries out, moved for a while)
 
 Each group can be collapsed (click its heading, or press Enter on it); the
 groups you've collapsed are remembered in your browser. Within a group,
@@ -64,6 +66,18 @@ model or IEEE address.
 
 If ZHA isn't running, the devices it registered are still listed, all
 offline, with a note at the top.
+
+### Maintenance
+
+When a device is offline on purpose, press **Maintenance** on its row (or
+**Move all to Maintenance** on the Offline heading). It's then listed
+under Maintenance, its status reads Maintenance, and it's no longer
+counted as offline in the header or on the Devices button. Press
+**Return** (or **Return all**) to list it with the others again. A device
+stays in maintenance until you return it, even once it's back online, so
+you can see it's back (hover over its status) before returning it. The
+devices in maintenance are kept in Home Assistant's storage
+(`.storage/zigbee_orchestrator.maintenance`).
 
 ## Groups
 

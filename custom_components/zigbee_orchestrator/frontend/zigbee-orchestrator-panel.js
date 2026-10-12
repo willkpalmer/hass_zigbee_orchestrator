@@ -13,7 +13,9 @@
 //
 //   #devices  Devices - every Zigbee device of the ZHA integration, grouped
 //             by its role on the network (Coordinator, Routers, End
-//             devices), with the offline ones apart under Offline. Each
+//             devices), with the offline ones apart under Offline and
+//             those put in maintenance (deliberately offline: Maintenance
+//             and Return buttons) under Maintenance. Each
 //             group can be collapsed (remembered in the browser) and is
 //             sorted by name; the columns can be sorted too.
 //   #groups   Groups - groups of devices made here, only for finding and

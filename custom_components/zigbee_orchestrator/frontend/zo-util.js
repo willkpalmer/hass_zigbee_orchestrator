@@ -4,6 +4,7 @@
 export const WS = {
   DEVICES_SUBSCRIBE: "zigbee_orchestrator/devices/subscribe",
   TOPOLOGY_SCAN: "zigbee_orchestrator/topology/scan",
+  MAINTENANCE_SET: "zigbee_orchestrator/maintenance/set",
   GROUPS_SUBSCRIBE: "zigbee_orchestrator/groups/subscribe",
   GROUPS_CREATE: "zigbee_orchestrator/groups/create",
   GROUPS_RENAME: "zigbee_orchestrator/groups/rename",
@@ -14,13 +15,15 @@ export const WS = {
 };
 
 // The device groups, in this order (each device's "category", see
-// devices.py): offline devices are kept apart whatever their role.
+// devices.py): offline devices are kept apart whatever their role, and
+// devices in maintenance (deliberately offline) apart from those.
 export const CATEGORIES = [
   ["coordinator", "Coordinator"],
   ["router", "Routers"],
   ["end_device", "End devices"],
   ["unknown", "Unknown type"],
   ["offline", "Offline"],
+  ["maintenance", "Maintenance"],
 ];
 
 // Where readings turn from red (low) to amber (medium) to green (high):

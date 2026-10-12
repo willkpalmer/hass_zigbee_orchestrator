@@ -25,3 +25,6 @@ ROLE_UNKNOWN = "unknown"
 # The device groups made on the Groups page (groups.py): only for finding
 # devices, nothing to do with ZHA's own Zigbee groups.
 DATA_GROUPS = f"{DOMAIN}_groups"
+
+# The devices marked as in maintenance on the Devices page (maintenance.py).
+DATA_MAINTENANCE = f"{DOMAIN}_maintenance"

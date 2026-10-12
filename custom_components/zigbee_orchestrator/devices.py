@@ -31,6 +31,8 @@ from .const import ROLE_COORDINATOR, ROLE_END_DEVICE, ROLE_ROUTER, ROLE_UNKNOWN,
 _LOGGER = logging.getLogger(__name__)
 
 CATEGORY_OFFLINE = "offline"
+# Devices put in maintenance (maintenance.py), online or not.
+CATEGORY_MAINTENANCE = "maintenance"
 
 # The topology scan started from the panel, while it runs.
 _DATA_SCAN = "zigbee_orchestrator_topology_scan"
@@ -204,11 +206,15 @@ def _battery(
 
 @callback
 def build_device_list(
-    hass: HomeAssistant, network: dict[str, ZhaDevice] | None
+    hass: HomeAssistant,
+    network: dict[str, ZhaDevice] | None,
+    maintenance: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Every ZHA device, as the panel's records.
 
     network is zha_network's result: None when ZHA isn't running.
+    maintenance: the ids of the devices in maintenance, which are put in
+    the Maintenance category whatever their state.
     """
     dev_reg = dr.async_get(hass)
     ent_reg = er.async_get(hass)
@@ -245,7 +251,12 @@ def build_device_list(
                 "model": device.model or "",
                 "role": role,
                 "available": available,
-                "category": role if available else CATEGORY_OFFLINE,
+                "category": (
+                    CATEGORY_MAINTENANCE
+                    if maintenance and device.id in maintenance
+                    else role if available else CATEGORY_OFFLINE
+                ),
+                "maintenance": bool(maintenance and device.id in maintenance),
                 "battery": level,
                 "battery_low": low,
                 "battery_entity": battery_entity,
