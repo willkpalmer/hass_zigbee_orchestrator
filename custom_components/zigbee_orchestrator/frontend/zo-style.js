@@ -117,7 +117,7 @@ a:hover { text-decoration: underline; }
 .chip.online { background: rgba(76, 175, 80, 0.15); color: var(--success-color, #43a047); }
 .chip.offline { background: rgba(219, 68, 55, 0.15); color: var(--error-color, #db4437); }
 .chip.maintenance { background: rgba(3, 169, 244, 0.15); color: var(--primary-color, #03a9f4); }
-tbody tr.group.maintenance td { color: var(--primary-color, #03a9f4); }
+tbody tr.group.maintenance td { color: #5acd7b; }
 .row-btn {
   font: inherit; font-size: 12px; font-weight: 500; white-space: nowrap; cursor: pointer;
   padding: 2px 8px; border-radius: 10px; border: 1px solid var(--divider-color, #ccc);
